@@ -48,7 +48,6 @@ class Splined_Track():
         ax.plot(self.waypoints[:, 0], self.waypoints[:, 1], 'x')
 
     def plot_track(self, ax, draw_boundaries=False):
-            
             # Plot the spline
             ax.plot(self.track_centers[:, 0], self.track_centers[:, 1], '--')
             # Plot the track width
@@ -69,7 +68,7 @@ if __name__ == "__main__":
     track = Splined_Track(gates, track_width)
     fig, ax = plt.subplots()
     ax.set_aspect('equal')
-    plot_waypoints_2d(ax, gates)
+    # plot_waypoints_2d(ax, gates)
     plot_track(ax, track)
     # plot_tangents(ax, track)
     random_points = (np.random.rand(20, 2) - 0.2)*5
