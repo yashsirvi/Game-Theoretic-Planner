@@ -63,7 +63,7 @@ def plot_tangents(ax, track):
     ax.quiver(track.track_centers[random_samples, 0], track.track_centers[random_samples, 1], track.track_normals[random_samples, 0], track.track_normals[random_samples, 1], color='g')
 
 if __name__ == "__main__":
-    gates = np.array(   )
+    gates = np.array([])
     track_width = 0.2
     track = Splined_Track(gates, track_width)
     fig, ax = plt.subplots()

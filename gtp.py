@@ -19,6 +19,7 @@ class SE_IBR():
         self.nc_weight = 1
         self.nc_relax_weight = 128.0
         self.track_relax_weight = 128.0  # possibly should be the largest of the gains?
+        self.max_curvature = config.max_curvature
 
     def init_traj(self, i, p_0):
         """
@@ -49,6 +50,7 @@ class SE_IBR():
         p = cp.Variable((self.n_steps, 2))
         width = self.config.track_width
 
+
         # === hi(θi)=0 ===  Equality constraints only involving player i
         # Dynamic constraints:
         # (p_i)^k - (p_i)^(k-1) - v_i*dt = 0 
@@ -60,7 +62,7 @@ class SE_IBR():
         # ||p[k+1] - p[k]|| <= v*dt
         dyn_constraints = [init_dyn_constraint] + [
             cp.SOC(cp.Constant(v_i * self.dt), p[k + 1, :] - p[k, :]) for k in range(self.n_steps - 1)]
-        
+
         # === γ(θi, θj) <= 0 === Inequality involving both players
         # Collision constraints:
         # (p_i)^k - (p_j)^k <= di for all k
@@ -85,8 +87,8 @@ class SE_IBR():
             nc_obj += (non_collision_objective_exp ** k) * cp.pos(d_safe - (beta.dot(p_opp) - beta.T @ p[k, :]))
             # For relaxed non-collision objective use collision distance
             nc_relax_obj += (non_collision_objective_exp ** k) * cp.pos(d_coll - (beta.dot(p_opp) - beta.T @ p[k, :]))
-                                        
-        
+
+
 
         # === g(θi) <= 0 === Inequality constraints only involving player i
         # Velocity constraints: v_i - v_max <= 0
@@ -97,9 +99,10 @@ class SE_IBR():
         track_objective_exp = 0.5  #xponentially decreasing weight e
         t = np.zeros((self.n_steps, 2)) # tangent
         n = np.zeros((self.n_steps, 2)) # normal
+        prog_idx = np.zeros((self.n_steps, 1))
         for k in range(self.n_steps):
             # query track indices at ego position
-            idx, c, t[k, :], n[k, :] = self.track.nearest_trackpoint(trajectories[i][k, :])
+            prog_idx[k], c, t[k, :], n[k, :] = self.track.nearest_trackpoint(trajectories[i][k, :])
             # hortizontal track height constraints
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) <= width - self.config.collision_radius)
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) >= -(width - self.config.collision_radius))
@@ -107,11 +110,30 @@ class SE_IBR():
             track_obj += (track_objective_exp ** k) * (
                     cp.pos(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) - (width - self.config.collision_radius)) +
                     cp.pos(-(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) + (width - self.config.collision_radius))))
-       
+
+
+        # curvature constraints
+        for k in range(1, self.n_steps - 1):
+            v_ego1 = trajectories[i][k + 1, :] - trajectories[i][k, :]
+            v_ego0 = trajectories[i][k, :] - trajectories[i][k - 1, :]
+            acc_ego = v_ego1 - v_ego0
+            curvature = np.linalg.norm(np.cross(v_ego1, v_ego0)) / (np.linalg.norm(v_ego1) ** 3)
+            curvature = abs(curvature)
+            # convert to cvxpy expression
+            curvature = cp.Constant(curvature)
+            # curvature_i  <= max_curvature
+            curvature_constraint = cp.pos(curvature - self.max_curvature)
+            # add to constraints
+            track_obj += (track_objective_exp ** k) * curvature_constraint
+            if k == self.n_steps - 2:
+                print("curvature: ", curvature)
+
         # === "Win the Race" Objective ===
         # Take the tangent t at the last trajectory point
         # This serves as an approximation to the total track progress
-        obj = -t[-1, :].T @ p[-1, :]
+        obj = -t[-1, :].T @ p[-1, :] # why ???
+        # obj = -prog_idx[-1]
+        
         # create the problem in cxvpy and solve it
         prob = cp.Problem(cp.Minimize(obj + self.nc_weight * nc_obj), dyn_constraints + track_constraints + nc_constraints)
 
@@ -176,20 +198,30 @@ if __name__ == "__main__":
     way_idx = 4
     ego_state = planner.track.waypoints[way_idx]
     # move opponent along normal
-    opp_state = planner.track.waypoints[way_idx] + planner.track.track_normals[way_idx]*0.1
+    # print(planner.track.track_normals[way_idx])
+    opp_state = planner.track.waypoints[way_idx] + planner.track.track_normals[way_idx]*0.05 - planner.track.track_tangent[way_idx]*0.1
     state = np.array([ego_state, opp_state])
-    trajectory = planner.iterative_br(0, state)
-    # print(trajectory)
-    # Plot the track and the trajectory
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal')
-    # planner.track.plot_waypoints_2d(ax)
-    # plot initial position
-    ax.plot(state[0, 0], state[0, 1], 'rx')
-    ax.plot(state[1, 0], state[1, 1], 'gx')
-    planner.track.plot_track(ax, draw_boundaries=True)
-    # ax.plot(planner.traj[:, 0], planner.traj[:, 1])
-    ax.plot(trajectory[0, :, 0], trajectory[0, :, 1], 'r')
-    ax.plot(trajectory[1, :, 0], trajectory[1, :, 1], 'g')
-    plt.show()
+    # print(state)
+    for i in range(20):
+        trajectory = planner.iterative_br(0, state)
+        # print(trajectory)
+        # Plot the track and the trajectory
+        fig, ax = plt.subplots()
+        ax.set_aspect('equal')
+        # planner.track.plot_waypoints_2d(ax)
+        # plot initial position
+        ax.plot(state[0, 0], state[0, 1], 'rx')
+        ax.plot(state[1, 0], state[1, 1], 'gx')
+        # plot box around initial position SIZE OF COLLISINO WINDOW for each car
+        ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
+                [state[0, 1] - planner.config.collision_radius, state[0, 1] - planner.config.collision_radius], 'r')
+        ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
+                [state[0, 1] + planner.config.collision_radius, state[0, 1] + planner.config.collision_radius], 'r')
+        
+        state = np.array([trajectory[0, 1, :], trajectory[1, 1, :]])
+        planner.track.plot_track(ax, draw_boundaries=True)
+        # ax.plot(planner.traj[:, 0], planner.traj[:, 1])
+        ax.plot(trajectory[0, :, 0], trajectory[0, :, 1], 'r')
+        ax.plot(trajectory[1, :, 0], trajectory[1, :, 1], 'g')
+        plt.show()
 
