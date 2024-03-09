@@ -22,7 +22,7 @@ def plot_track_arrows(ax, track):
                  head_width=0.08, head_length=0.25, fc='k', ec='k')
 
 def plot_track(ax, track):
-left_boundary = track.track_centers + track.track_normals*track.track_widths[:, np.newaxis]
+    left_boundary = track.track_centers + track.track_normals*track.track_widths[:, np.newaxis]
     right_boundary = track.track_centers - track.track_normals*track.track_widths[:, np.newaxis]
 
     # Plot the spline

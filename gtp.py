@@ -4,6 +4,7 @@ import config
 import matplotlib.pyplot as plt
 import cvxpy as cp
 import time
+import config
 
 class SE_IBR():
     def __init__(self, config):
@@ -180,6 +181,7 @@ if __name__ == "__main__":
     state = np.array([ego_state, opp_state])
     trajectory = planner.iterative_br(0, state)
     # print(trajectory)
+    # print(trajectory)
     # Plot the track and the trajectory
     fig, ax = plt.subplots()
     ax.set_aspect('equal')
@@ -189,6 +191,7 @@ if __name__ == "__main__":
     ax.plot(state[1, 0], state[1, 1], 'gx')
     planner.track.plot_track(ax, draw_boundaries=True)
     # ax.plot(planner.traj[:, 0], planner.traj[:, 1])
+    # print(trajectory[0, :, 0])
     ax.plot(trajectory[0, :, 0], trajectory[0, :, 1], 'r')
     ax.plot(trajectory[1, :, 0], trajectory[1, :, 1], 'g')
     plt.show()

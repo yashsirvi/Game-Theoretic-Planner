@@ -69,7 +69,7 @@ if __name__ == "__main__":
     fig, ax = plt.subplots()
     ax.set_aspect('equal')
     # plot_waypoints_2d(ax, gates)
-    plot_track(ax, track)
+    track.plot_track(ax, track)
     # plot_tangents(ax, track)
     random_points = (np.random.rand(20, 2) - 0.2)*5
     for rp in random_points:
