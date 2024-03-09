@@ -80,8 +80,7 @@ class SE_IBR():
             if np.linalg.norm(beta) >= 1e-6:
                 # Only normalize if norm is large enough
                 beta /= np.linalg.norm(beta)
-            #     n.T * (p_opp - p_ego) >= d_coll
-            nc_constraints.append(beta.dot(p_opp) - beta.T @ p[k, :] >= d_coll)
+            nc_constraints.append(beta.dot(p_opp) - beta.T @ p[k, :]     >= d_coll)
             #TODO: See wtf is nc_obj and nc_relax_obj
             # For normal non-collision objective use safety distance
             nc_obj += (non_collision_objective_exp ** k) * cp.pos(d_safe - (beta.dot(p_opp) - beta.T @ p[k, :]))
@@ -99,10 +98,9 @@ class SE_IBR():
         track_objective_exp = 0.5  #xponentially decreasing weight e
         t = np.zeros((self.n_steps, 2)) # tangent
         n = np.zeros((self.n_steps, 2)) # normal
-        prog_idx = np.zeros((self.n_steps, 1))
         for k in range(self.n_steps):
             # query track indices at ego position
-            prog_idx[k], c, t[k, :], n[k, :] = self.track.nearest_trackpoint(trajectories[i][k, :])
+            _, c, t[k, :], n[k, :] = self.track.nearest_trackpoint(trajectories[i][k, :])
             # hortizontal track height constraints
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) <= width - self.config.collision_radius)
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) >= -(width - self.config.collision_radius))
@@ -113,20 +111,20 @@ class SE_IBR():
 
 
         # curvature constraints
-        for k in range(1, self.n_steps - 1):
-            v_ego1 = trajectories[i][k + 1, :] - trajectories[i][k, :]
-            v_ego0 = trajectories[i][k, :] - trajectories[i][k - 1, :]
-            acc_ego = v_ego1 - v_ego0
-            curvature = np.linalg.norm(np.cross(v_ego1, v_ego0)) / (np.linalg.norm(v_ego1) ** 3)
-            curvature = abs(curvature)
-            # convert to cvxpy expression
-            curvature = cp.Constant(curvature)
-            # curvature_i  <= max_curvature
-            curvature_constraint = cp.pos(curvature - self.max_curvature)
-            # add to constraints
-            track_obj += (track_objective_exp ** k) * curvature_constraint
-            if k == self.n_steps - 2:
-                print("curvature: ", curvature)
+        # for k in range(1, self.n_steps - 1):
+        #     v_ego1 = trajectories[i][k + 1, :] - trajectories[i][k, :]
+        #     v_ego0 = trajectories[i][k, :] - trajectories[i][k - 1, :]
+        #     acc_ego = v_ego1 - v_ego0
+        #     curvature = np.linalg.norm(np.cross(v_ego1, v_ego0)) / (np.linalg.norm(v_ego1) ** 3)
+        #     curvature = abs(curvature)
+        #     # convert to cvxpy expression
+        #     curvature = cp.Constant(curvature)
+        #     # curvature_i  <= max_curvature
+        #     curvature_constraint = cp.pos(curvature - self.max_curvature)
+        #     # add to constraints
+        #     track_obj += (track_objective_exp ** k) * curvature_constraint
+        #     if k == self.n_steps - 2:
+        #         print("curvature: ", curvature)
 
         # === "Win the Race" Objective ===
         # Take the tangent t at the last trajectory point

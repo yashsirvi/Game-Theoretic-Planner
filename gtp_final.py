@@ -34,8 +34,16 @@ class SE_IBR():
         a0 = [p_0[0], self.config.v_max, 0]
         b0 = [p_0[1], self.config.v_max, 0]
         print(a0, b0)
-        Ai = np.tile(a0, (self.n_steps, 1))
-        Bi = np.tile(b0, (self.n_steps, 1))
+        Ai = np.zeros((self.n_steps, 3))
+        Bi = np.zeros((self.n_steps, 3))
+        for k in range(self.n_steps):
+            t = k+1
+            p = [a0[0] + a0[1]*t + a0[2]*t**2, b0[0] + b0[1]*t + b0[2]*t**2]
+            idx, c, t, n = self.track.nearest_trackpoint(p)
+            v_x = config.v_max * t[0]
+            v_y = config.v_max * t[1]
+            Ai[k] = [p[0], v_x, 0]
+            Bi[k] = [p[1], v_y, 0]
         return (Ai, Bi)
 
  
@@ -84,25 +92,26 @@ class SE_IBR():
         nc_obj = cp.Constant(0)
         nc_relax_obj = cp.Constant(0)
         non_collision_objective_exp = 0.5  # exponentially decreasing weight
-        # for k in range(self.n_steps):
-        #     A_opp = trajectories[j][0][k, :]
-        #     B_opp = trajectories[j][1][k, :]
-        #     A_ego = trajectories[i][0][k, :]
-        #     B_ego = trajectories[i][1][k, :]
-        #     p_ego = [A_ego[0] + A_ego[1] * (k) + A_ego[2] * (k)**2, B_ego[0] + B_ego[1] * (k) + B_ego[2] * (k)**2]
-        #     p_opp = [A_opp[0] + A_opp[1] * (k) + A_opp[2] * (k)**2, B_opp[0] + B_opp[1] * (k) + B_opp[2] * (k)**2]
-        #     # Compute beta, the normal direction vector pointing from the ego's drone position to the opponent's
-        #     beta = p_opp - p_ego
-        #     if np.linalg.norm(beta) >= 1e-6:
-        #         # Only normalize if norm is large enough
-        #         beta /= np.linalg.norm(beta)
-        #     #     n.T * (p_opp - p_ego) >= d_coll
-        #     nc_constraints.append(beta.dot(p_opp) - beta.T @ p[k, :] >= d_coll)
-        #     #TODO: See wtf is nc_obj and nc_relax_obj
-        #     # For normal non-collision objective use safety distance
-        #     nc_obj += (non_collision_objective_exp ** k) * cp.pos(d_safe - (beta.dot(p_opp) - beta.T @ p[k, :]))
-        #     # For relaxed non-collision objective use collision distance
-        #     nc_relax_obj += (non_collision_objective_exp ** k) * cp.pos(d_coll - (beta.dot(p_opp) - beta.T @ p[k, :]))
+        for k in range(self.n_steps):
+            A_opp = trajectories[j][0][k, :]
+            B_opp = trajectories[j][1][k, :]
+            A_ego = trajectories[i][0][k, :]
+            B_ego = trajectories[i][1][k, :]
+            ts = k+1
+            p_ego = [A_ego[0] + A_ego[1] * (ts) + A_ego[2] * (ts)**2, B_ego[0] + B_ego[1] * (ts) + B_ego[2] * (ts)**2]
+            p_opp = [A_opp[0] + A_opp[1] * (ts) + A_opp[2] * (ts)**2, B_opp[0] + B_opp[1] * (ts) + B_opp[2] * (ts)**2]
+            # Compute beta, the normal direction vector pointing from the ego's drone position to the opponent's
+            beta = [p_opp[0] - p_ego[0], p_opp[1] - p_ego[1]]
+            if np.linalg.norm(beta) >= 1e-6:
+                # Only normalize if norm is large enough
+                beta /= np.linalg.norm(beta)
+            p_curr = [strat_A[k, 0] + strat_A[k,1] * (ts) + strat_A[k,2] * (ts)**2, strat_B[k,0] + strat_B[k,1] * (ts) + strat_B[k,2] * (ts)**2]
+            nc_constraints.append(beta.dot(p_opp) - beta.T @ p_curr >= d_coll)
+            #TODO: See wtf is nc_obj and nc_relax_obj
+            # For normal non-collision objective use safety distance
+            nc_obj += (non_collision_objective_exp ** k) * cp.pos(d_safe - (beta.dot(p_opp) - beta.T @ p_curr))
+            # For relaxed non-collision objective use collision distance
+            nc_relax_obj += (non_collision_objective_exp ** k) * cp.pos(d_coll - (beta.dot(p_opp) - beta.T @ p_curr))
 
         for k in range(self.n_steps):
             t = k+1
@@ -146,32 +155,46 @@ class SE_IBR():
         track_objective_exp = 0.5  #xponentially decreasing weight e
         t = np.zeros((self.n_steps, 2)) # tangent
         n = np.zeros((self.n_steps, 2)) # normal
-        prog = np.zeros((self.n_steps, 1))
         for k in range(self.n_steps):
             # query track indices at ego position
             A_ego = trajectories[i][0][k]
             B_ego = trajectories[i][1][k]
-            p_cur = np.array([A_ego[0] + A_ego[1] * (k) + A_ego[2] * (k)**2, B_ego[0] + B_ego[1] * (k) + B_ego[2] * (k)**2])
-            idx, c, t[k, :], n[k, :] = self.track.nearest_trackpoint(p_cur)
-            # hortizontal track height constraints
-            expr1 = cp.norm(n[k, :] @ p_cur - np.dot(n[k, :], c))
-            track_constraints.append(expr1 <= width - self.config.collision_radius)
-            track_constraints.append(expr1 >= -(width - self.config.collision_radius))
+            ts = k+1
+            p_cur = [A_ego[0] + A_ego[1] * (ts) + A_ego[2] * (ts)**2, B_ego[0] + B_ego[1] * (ts) + B_ego[2] * (ts)**2]
+            _, c, t[k, :], n[k, :] = self.track.nearest_trackpoint(p_cur)
+            p_new = [strat_A[k, 0] + strat_A[k,1] * (ts) + strat_A[k,2] * (ts)**2, strat_B[k,0] + strat_B[k,1] * (ts) + strat_B[k,2] * (ts)**2]
+            
+            track_constraints.append(n[k, :].T @ p_new - np.dot(n[k, :], c) <= width - self.config.collision_radius)
+            track_constraints.append(n[k, :].T @ p_new - np.dot(n[k, :], c) >= -(width - self.config.collision_radius))
+
             # track constraints objective
-            track_obj += (track_objective_exp ** k) * (cp.pos(expr1 - (width - self.config.collision_radius)) + cp.pos(-expr1 + (width - self.config.collision_radius)))
+            track_obj += (track_objective_exp ** k) * ( cp.pos(n[k, :].T @ p_new - np.dot(n[k, :], c) - (width - self.config.collision_radius)) +
+                                                        cp.pos(-(n[k, :].T @ p_new - np.dot(n[k, :], c) + (width - self.config.collision_radius))))
 
 
         # === "Win the Race" Objective ===
         # Take the tangent t at the last trajectory point
         # This serves as an approximation to the total track progress
-        obj = -t[-1, :].T @ [strat_A[-1,0] + strat_A[-1,1] * (self.n_steps) + strat_A[-1,2] * (self.n_steps)**2, strat_B[-1,0] + strat_B[-1,1] * (self.n_steps) + strat_B[-1,2] * (self.n_steps)**2]
+        ns = self.n_steps
+        pT = [strat_A[-1,0] + strat_A[-1,1] * (ns) + strat_A[-1,2] * (ns)**2, strat_B[-1,0] + strat_B[-1,1] * (ns) + strat_B[-1,2] * (ns)**2]
+        obj = -t[-1, :].T @ pT
+        print("tanget:", t[-1, :].T, "pT:", pT)
+        tangent = [[pT[0], pT[1]]]
+        tangent +=[[pT[0] + t[-1, 0], pT[1] + t[-1, 1]]]
+        # print(tangent)
+        # plot the tangent
+        # plt.plot(tangent[0], tangent[1], 'g')
+        # plt.plot([pT[0], pT[0] + t[-1, 0]], [pT[1], pT[1] + t[-1, 1]], 'r')
+        # print("OBJ:", obj)
+        # print(self.nc_weight * nc_obj)
+        # print(self.track_relax_weight * track_obj)
         # create the problem in cxvpy and solve it
         prob = cp.Problem(cp.Minimize(obj), 
                         track_constraints 
                         + nc_constraints
                         + vel_constraints
                         + acc_constraints
-                        + continuity_constraints
+                        +continuity_constraints
                         ) 
 
         # try to solve proposed problem
