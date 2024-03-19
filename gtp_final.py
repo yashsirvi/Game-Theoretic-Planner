@@ -95,9 +95,9 @@ class SE_IBR:
                 b_Bt + 2 * c_Bt * k - (b_Btp1 + 2 * c_Btp1 * (k + 1)) == 0
             )
 
-        # pt1 = [strat_A[0, 0], strat_B[0, 0]]
-        # continuity_constraints.append(p_i[0] - pt1[0] == 0)
-        # continuity_constraints.append(p_i[1] - pt1[1] == 0)
+        pt1 = [strat_A[0, 0], strat_B[0, 0]]
+        continuity_constraints.append(p_i[0] - pt1[0] == 0)
+        continuity_constraints.append(p_i[1] - pt1[1] == 0)
         # === γ(θi, θj) <= 0 === Inequality involving both players
         # Collision constraints:
         # (p_i)^k - (p_j)^k <= di for all k
@@ -141,6 +141,14 @@ class SE_IBR:
                 d_coll - (beta.dot(p_opp) - beta.T @ p_curr)
             )
 
+        for k in range(self.n_steps):
+            t = k
+            a_A, b_A, c_A = strat_A[k, :]
+            a_B, b_B, c_B = strat_B[k, :]
+            oa_A, ob_A, oc_A = trajectories[j][0][k]
+            oa_B, ob_B, oc_B = trajectories[j][1][k]
+            dist = cp.norm(cp.vstack([a_A + b_A*t + c_A*t**2 - (oa_A + ob_A*t + oc_A*t**2), a_B + b_B*t + c_B*t**2 - (oa_B + ob_B*t + oc_B*t**2)]))
+            nc_constraints.append(dist <= d_coll)
 
         # === g(θi) <= 0 === Inequality constraints only involving player i
         # Speed constraints: v_i - v_max <= 0
@@ -161,8 +169,8 @@ class SE_IBR:
             a_A, b_A, c_A = strat_A[k, :]
             a_B, b_B, c_B = strat_B[k, :]
             # a_i - a_max <= 0
-            acc_x = 2 * c_A
-            acc_y = 2 * c_B
+            acc_x =     c_A
+            acc_y = c_B
             acc = cp.norm(cp.vstack([acc_x, acc_y]))
             acc_constraints.append(acc <= a_max)    
     
@@ -295,7 +303,7 @@ class SE_IBR:
                 "WARN: cvxpy failre: resorting to initial trajectory (no collision constraints!)"
             )
             exit(0)
-            trajectory_result = trajectories[i]
+        trajectory_result = trajectories[i]
         return trajectory_result
 
     def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=3):
