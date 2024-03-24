@@ -167,14 +167,30 @@ class SE_IBR:
                 d_coll - (beta.dot(p_opp) - beta.T @ p_curr)
             )
 
-        for k in range(self.n_steps):
-            t = k
-            a_A, b_A, c_A = strat_A[k, :]
-            a_B, b_B, c_B = strat_B[k, :]
-            oa_A, ob_A, oc_A = trajectories[j][0][k]
-            oa_B, ob_B, oc_B = trajectories[j][1][k]
-            dist = cp.norm(cp.vstack([a_A + b_A*t + c_A*t**2 - (oa_A + ob_A*t + oc_A*t**2), a_B + b_B*t + c_B*t**2 - (oa_B + ob_B*t + oc_B*t**2)]))
-            nc_constraints.append(dist <= d_coll)
+        # for k in range(self.n_steps):
+        #     t = k
+        #     a_A, b_A, c_A = strat_A[k, :]
+        #     a_B, b_B, c_B = strat_B[k, :]
+        #     oa_A, ob_A, oc_A = trajectories[j][0][k]
+        #     oa_B, ob_B, oc_B = trajectories[j][1][k]
+        #     dist = cp.norm(cp.vstack([a_A + b_A*t + c_A*t**2 - (oa_A + ob_A*t + oc_A*t**2), a_B + b_B*t + c_B*t**2 - (oa_B + ob_B*t + oc_B*t**2)]))
+        #     nc_constraints.append(dist <= d_coll)
+            
+        # bound the constant term
+        traj_i_x = trajectories[i][0][:, 0]
+        traj_i_y = trajectories[i][1][:, 0]
+        max_cix = np.max(traj_i_x)
+        max_ciy = np.max(traj_i_y)
+        print(max_cix, max_ciy)
+        c_constraint = [strat_A[k, 0] <= max_cix for k in range(self.n_steps)]
+        c_constraint += [strat_B[k, 0] <= max_ciy for k in range(self.n_steps)]
+
+        # a_constraint = [strat_A[k, 1] <= 1 for k in range(self.n_steps)]
+        # a_constraint += [strat_B[k, 1] <= 1 for k in range(self.n_steps)]
+
+        # b_constraint = [strat_A[k, ] <= 1 for k in range(self.n_steps)]
+        # b_constraint += [strat_B[k, 1] <= 1 for k in range(self.n_steps)]
+
 
         # === g(θi) <= 0 === Inequality constraints only involving player i
         # Speed constraints: v_i - v_max <= 0
@@ -257,7 +273,7 @@ class SE_IBR:
         # create the problem in cxvpy and solve it
         prob = cp.Problem(
             cp.Minimize(obj),
-            track_constraints + nc_constraints + vel_constraints + acc_constraints,
+            track_constraints + nc_constraints + vel_constraints + acc_constraints + c_constraint,
             # + continuity_constraints,
         )
 
@@ -283,7 +299,8 @@ class SE_IBR:
                     nc_constraints
                     + vel_constraints
                     + acc_constraints
-                    + continuity_constraints,
+                    + continuity_constraints
+                    + c_constraint,
                 )
                 relaxed_prob.solve()
 
