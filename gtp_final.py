@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import cvxpy as cp
 import time
 import math
-
+from scipy.optimize import curve_fit
 
 class SE_IBR:
     def __init__(self, config):
@@ -32,18 +32,44 @@ class SE_IBR:
         :param i: Index of the current track frame
         :return: Initial trajectory
         """
-        a0 = [p_0[0], self.config.v_max, 0]
-        b0 = [p_0[1], self.config.v_max, 0]
-        print(a0, b0)
+        # a0 = [p_0[0], self.config.v_max, 0]
+        # b0 = [p_0[1], self.config.v_max, 0]
+        # print(a0, b0)
         Ai = np.zeros((self.n_steps, 3))
         Bi = np.zeros((self.n_steps, 3))
         for k in range(self.n_steps):
-            p = [a0[0] + a0[1] * k + a0[2] * k**2, b0[0] + b0[1] * k + b0[2] * k**2]
-            idx, c, t, n = self.track.nearest_trackpoint(p)
-            v_x = config.v_max * t[0]
-            v_y = config.v_max * t[1]
-            Ai[k] = [p[0], v_x, 0]
-            Bi[k] = [p[1], v_y, 0]
+            idx, c0, t0, n0 = self.track.nearest_trackpoint(p_0)
+            p_1 = p_0 + self.config.v_max * t0
+            _, c1, t1, n1 = self.track.nearest_trackpoint(p_1)
+            p_2 = p_1 + self.config.v_max * t1
+
+            # fit a quadratic to the line between the two points give two eqn for each x and y
+            eqn_x = np.polyfit([k, k+1, k+2], [p_0[0], p_1[0], p_2[0]], 2)
+            eqn_y = np.polyfit([k, k+1, k+2], [p_0[1], p_1[1], p_2[1]], 2)
+            # print(k)
+            # print(eqn_x, eqn_y)
+            # print(p_0, p_1, p_2)
+            # # plot this trajectory
+            # fig, ax = plt.subplots()
+            # ax.set_aspect("equal")
+            # self.track.plot_track(ax, draw_boundaries=True)
+
+            # plt.plot([p_0[0], p_1[0], p_2[0]], [p_0[1], p_1[1], p_2[1]], "r")
+            # predicted_points = np.array(
+            #     [
+            #         [eqn_x[0]* t ** 2 + eqn_x[1] * t + eqn_x[2] , eqn_y[0]* t ** 2 + eqn_y[1] * t + eqn_y[2] ]
+            #         for t in range(k, k + 3)
+            #     ]
+            # )
+            # ax.plot(predicted_points[:, 0], predicted_points[:, 1], "r")
+            # ax.plot(p_0[0], p_0[1], "rx")
+            # ax.plot(p_1[0], p_1[1], "rx")
+            # ax.plot(p_2[0], p_2[1], "rx")
+
+            plt.show()
+            Ai[k, :] = [eqn_x[2], eqn_x[1], eqn_x[0]]
+            Bi[k, :] = [eqn_y[2], eqn_y[1], eqn_y[0]]
+            p_0 = p_1
         return (Ai, Bi)
 
     def best_response(self, i, state, trajectories):
@@ -75,24 +101,24 @@ class SE_IBR:
 
             continuity_constraints.append(
                 a_At
-                + b_At * k
-                + c_At * k**2
+                + b_At * (k+1)
+                + c_At * (k+1)**2
                 - (a_Atp1 + b_Atp1 * (k + 1) + c_Atp1 * (k + 1) ** 2)
                 == 0
-            )
+            )   
             continuity_constraints.append(
                 a_Bt
-                + b_Bt * k
-                + c_Bt * k**2
+                + b_Bt * (k+1)
+                + c_Bt * (k+1)**2
                 - (a_Btp1 + b_Btp1 * (k + 1) + c_Btp1 * (k + 1) ** 2)
                 == 0
             )
 
             continuity_constraints.append(
-                b_At + 2 * c_At * k - (b_Atp1 + 2 * c_Atp1 * (k + 1)) == 0
+                b_At + 2 * c_At * (k+1) - (b_Atp1 + 2 * c_Atp1 * (k + 1)) == 0
             )
             continuity_constraints.append(
-                b_Bt + 2 * c_Bt * k - (b_Btp1 + 2 * c_Btp1 * (k + 1)) == 0
+                b_Bt + 2 * c_Bt * (k+1) - (b_Btp1 + 2 * c_Btp1 * (k + 1)) == 0
             )
 
         pt1 = [strat_A[0, 0], strat_B[0, 0]]
@@ -160,19 +186,15 @@ class SE_IBR:
             # v_i - v_max <= 0
             vel_x = b_A + 2 * c_A * t
             vel_y = b_B + 2 * c_B * t
-            vel = cp.norm(cp.vstack([vel_x, vel_y]))
-            vel_constraints.append(vel <= v_max)
+            # vel = cp.norm(cp.vstack([vel_x, vel_y]))
+            vel_constraints.append(vel_x**2 + vel_y**2 <= v_max**2)
         # Acceleration constraints: a_i - a_max <= 0
         acc_constraints = []
         for k in range(self.n_steps):
             t = k 
-            a_A, b_A, c_A = strat_A[k, :]
-            a_B, b_B, c_B = strat_B[k, :]
-            # a_i - a_max <= 0
-            acc_x =     c_A
-            acc_y = c_B
-            acc = cp.norm(cp.vstack([acc_x, acc_y]))
-            acc_constraints.append(acc <= a_max)    
+            _, _, c_A = strat_A[k, :]
+            _, _, c_B = strat_B[k, :]
+            acc_constraints.append(c_A**2 + c_B**2 <= a_max)    
     
         # TODO: curvature constraints
         # curvature constraints
@@ -232,16 +254,6 @@ class SE_IBR:
             strat_B[-1, 0] + strat_B[-1, 1] * (ns) + strat_B[-1, 2] * (ns) ** 2,
         ]
         obj = -t[-1, :].T @ pT
-        print("tanget:", t[-1, :].T, "pT:", pT)
-        tangent = [[pT[0], pT[1]]]
-        tangent += [[pT[0] + t[-1, 0], pT[1] + t[-1, 1]]]
-        # print(tangent)
-        # plot the tangent
-        # plt.plot(tangent[0], tangent[1], 'g')
-        # plt.plot([pT[0], pT[0] + t[-1, 0]], [pT[1], pT[1] + t[-1, 1]], 'r')
-        # print("OBJ:", obj)
-        # print(self.nc_weight * nc_obj)
-        # print(self.track_relax_weight * track_obj)
         # create the problem in cxvpy and solve it
         prob = cp.Problem(
             cp.Minimize(obj),
@@ -308,6 +320,33 @@ class SE_IBR:
 
     def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=3):
         trajectories = [self.init_traj(i, state[i, :]) for i in [0, 1]]
+
+        # plot initial trajectories
+        pathi = []
+        pathj = []
+        pathi.append(state[0])
+        pathj.append(state[1])
+        for k in range(self.n_steps):
+            t = k 
+            (Ai, Bi), (Aj, Bj) = trajectories
+            Ai, Bi, Aj, Bj = Ai[k], Bi[k], Aj[k], Bj[k]
+            pathi.append(
+                [Ai[0] + Ai[1] * t + Ai[2] * t**2, Bi[0] + Bi[1] * t + Bi[2] * t**2]
+            )
+            pathj.append(
+                [Aj[0] + Aj[1] * t + Aj[2] * t**2, Bj[0] + Bj[1] * t + Bj[2] * t**2]
+            )
+        pathi = np.array(pathi)
+        pathj = np.array(pathj)
+        fig, ax = plt.subplots()
+        ax.set_aspect("equal")
+        self.track.plot_track(ax, draw_boundaries=True)
+        ax.plot(state[1][0], state[1][1], "bx")
+        ax.plot(state[0][0], state[0][1], "rx")
+        ax.plot(pathi[:, 0], pathi[:, 1], "r")
+        ax.plot(pathj[:, 0], pathj[:, 1], "b")
+        plt.show()
+
         t0 = time.time()
         for i_game in range(n_game_iterations - 1):
             for i in [i_ego, (i_ego + 1) % 2]:
@@ -325,7 +364,7 @@ class SE_IBR:
 if __name__ == "__main__":
     planner = SE_IBR(config)
     # state = np.array([planner.track.waypoints[0], planner.track.waypoints[0] + [0, 0.1]])
-    way_idx = 5
+    way_idx = 0
     ego_state = planner.track.waypoints[way_idx]
     # move opponent along normal
     # print(planner.track.track_normals[way_idx])
@@ -339,12 +378,13 @@ if __name__ == "__main__":
     for i in range(20):
         trajectory = planner.iterative_br(0, state)
         print(trajectory)
+        velocities = []
         pathi = []
         pathj = []
         pathi.append(state[0])
         pathj.append(state[1])
         for k in range(planner.n_steps):
-            t = k + 1
+            t = k
             (Ai, Bi), (Aj, Bj) = trajectory
             Ai, Bi, Aj, Bj = Ai[k], Bi[k], Aj[k], Bj[k]
             pathi.append(
@@ -353,6 +393,11 @@ if __name__ == "__main__":
             pathj.append(
                 [Aj[0] + Aj[1] * t + Aj[2] * t**2, Bj[0] + Bj[1] * t + Bj[2] * t**2]
             )
+            vix = Ai[1] + 2 * Ai[2] * t
+            viy = Bi[1] + 2 * Bi[2] * t
+            vi = math.sqrt(vix**2 + viy**2)
+            velocities.append(vi)
+        print("VELOCITIES:", velocities)
         pathi = np.array(pathi)
         pathj = np.array(pathj)
         fig, ax = plt.subplots()

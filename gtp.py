@@ -211,14 +211,19 @@ if __name__ == "__main__":
         ax.plot(state[0, 0], state[0, 1], 'rx')
         ax.plot(state[1, 0], state[1, 1], 'gx')
         # plot box around initial position SIZE OF COLLISINO WINDOW for each car
-        ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
-                [state[0, 1] - planner.config.collision_radius, state[0, 1] - planner.config.collision_radius], 'r')
-        ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
-                [state[0, 1] + planner.config.collision_radius, state[0, 1] + planner.config.collision_radius], 'r')
+        # ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
+        #         [state[0, 1] - planner.config.collision_radius, state[0, 1] - planner.config.collision_radius], 'r')
+        # ax.plot([state[0, 0] - planner.config.collision_radius, state[0, 0] + planner.config.collision_radius],
+        #         [state[0, 1] + planner.config.collision_radius, state[0, 1] + planner.config.collision_radius], 'r')
         
+        # print(trajectory[0, :, 0])
         state = np.array([trajectory[0, 1, :], trajectory[1, 1, :]])
+        ax.plot(state[0, 0], state[0, 1], 'rx')
+        ax.plot(state[1, 0], state[1, 1], 'gx')
+        print("new state: ", state)
         planner.track.plot_track(ax, draw_boundaries=True)
         # ax.plot(planner.traj[:, 0], planner.traj[:, 1])
+        print(trajectory)
         ax.plot(trajectory[0, :, 0], trajectory[0, :, 1], 'r')
         ax.plot(trajectory[1, :, 0], trajectory[1, :, 1], 'g')
         plt.show()
