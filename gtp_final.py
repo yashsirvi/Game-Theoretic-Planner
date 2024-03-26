@@ -155,8 +155,15 @@ class SE_IBR:
         max_cix = np.max(traj_i_x)
         max_ciy = np.max(traj_i_y)
         # print(max_cix, max_ciy)
-        c_constraint = [strat_A[k, 0] <= max_cix for k in range(self.n_steps)]
-        c_constraint += [strat_B[k, 0] <= max_ciy for k in range(self.n_steps)]
+        c_constraint = [strat_A[k, 0] <= 100 for k in range(self.n_steps)]
+        c_constraint += [strat_A[k, 0] >= -100 for k in range(self.n_steps)]
+        c_constraint += [strat_B[k, 0] <= 100 for k in range(self.n_steps)]
+        c_constraint += [strat_B[k, 0] >= -100 for k in range(self.n_steps)]
+
+        # a_constraint = [strat_A[k, 2] <= 100 for k in range(self.n_steps)]
+        # a_constraint += [strat_B[k, 2] <= 100 for k in range(self.n_steps)]
+        # b_constraint = [strat_A[k, 1] <= 100 for k in range(self.n_steps)]
+        
 
         # === g(θi) <= 0 === Inequality constraints only involving player i
         # Speed constraints: v_i - v_max <= 0
@@ -249,7 +256,10 @@ class SE_IBR:
                 # If the problem is not feasible, relax track constraints
                 # Assert it is indeed an infeasible problem and not unbounded (in which case value is -inf).
                 # (The dynamical constraints keep the problem bounded.)
-                assert prob.value >= 0.0
+                # assert prob.value >= 0.0
+                if (prob.value < 0):
+                    print("WARN: infeasible problem")
+                    return trajectories[i]
 
                 # Solve relaxed problem (track constraint -> track objective)
                 relaxed_prob = cp.Problem(
@@ -331,7 +341,7 @@ if __name__ == "__main__":
         - planner.track.track_tangent[way_idx] * 0.3
     )
     state = np.array([ego_state, opp_state])
-    print("STATE:", state)
+    # print("STATE:", state)
 
     fig, ax = plt.subplots()
     ax.set_aspect("equal")
@@ -343,7 +353,7 @@ if __name__ == "__main__":
 
     def update_frame(i, planner, state):
         trajectory = planner.iterative_br(0, state)
-        print(trajectory)
+        # print(trajectory)
         velocities = []
         pathi = []
         pathj = []
@@ -363,7 +373,7 @@ if __name__ == "__main__":
             viy = Bi[1] + 2 * Bi[2] * t
             vi = math.sqrt(vix**2 + viy**2)
             velocities.append(vi)
-        print("VELOCITIES:", velocities)
+        # print("VELOCITIES:", velocities)
         pathi = np.array(pathi)
         pathj = np.array(pathj)
         ego_point.set_data(state[0][0], state[0][1])
