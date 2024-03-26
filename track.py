@@ -27,6 +27,9 @@ class Splined_Track():
         dists = np.linalg.norm(waypoints[1:, :] - waypoints[:-1, :], axis=1)
         taus = np.linspace(0, self.arc_length[-1], 2**12)
         self.track_centers = self.track(taus)
+        # track_center_dist = np.linalg.norm(self.track_centers[1:, :] - self.track_centers[:-1, :], axis=1)
+        # self.progress = np.zeros_like(self.track_centers)
+        # self.progress[1:] = np.cumsum(track_center_dist)
         self.track_tangent = self.track.derivative(nu=1)(taus)
         self.track_tangent /= np.linalg.norm(self.track_tangent, axis=1)[:, np.newaxis]
         self.track_normals = np.zeros_like(self.track_tangent)
@@ -63,7 +66,7 @@ def plot_tangents(ax, track):
     ax.quiver(track.track_centers[random_samples, 0], track.track_centers[random_samples, 1], track.track_normals[random_samples, 0], track.track_normals[random_samples, 1], color='g')
 
 if __name__ == "__main__":
-    gates = np.array(   )
+    gates = np.array([])
     track_width = 0.2
     track = Splined_Track(gates, track_width)
     fig, ax = plt.subplots()
