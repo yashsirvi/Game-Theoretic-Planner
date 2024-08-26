@@ -104,7 +104,7 @@ class SE_IBR():
             # hortizontal track height constraints
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) <= width - self.config.collision_radius)
             track_constraints.append(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) >= -(width - self.config.collision_radius))
-            # track constraints objective
+            # track constraints objective   
             track_obj += (track_objective_exp ** k) * (
                     cp.pos(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) - (width - self.config.collision_radius)) +
                     cp.pos(-(n[k, :].T @ p[k, :] - np.dot(n[k, :], c) + (width - self.config.collision_radius))))
