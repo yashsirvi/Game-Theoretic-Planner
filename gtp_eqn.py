@@ -230,6 +230,7 @@ class SE_IBR:
             strat_A[-1, 0] + strat_A[-1, 1] * (ns) + strat_A[-1, 2] * (ns) ** 2,
             strat_B[-1, 0] + strat_B[-1, 1] * (ns) + strat_B[-1, 2] * (ns) ** 2,
         ]
+                        
         obj = -t[-1, :].T @ pT
         # create the problem in cxvpy and solve it
         prob = cp.Problem(
