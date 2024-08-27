@@ -6,6 +6,6 @@ track_width = 0.8
 max_curvature = 1.0
 
 collision_radius = 0.1
-v_max = 0.1
+v_max = 0.3
 a_max = 1
 

@@ -36,8 +36,7 @@ class SE_IBR:
         self.d_safe = 2 * self.config.collision_radius
         self.t_width = self.track.track_width
         self.prngkey = jax.random.PRNGKey(0)  # Initialize a random key
-        self.c_cont_constraint = jnp.array([2*i+1 for i in range(self.n_steps-1)]).reshape(-1, 1)
-        self.optimizer = optax.chain(optax.adam(1e-1), mdmm_jax.optax_prepare_update())
+        self.optimizer = optax.chain(optax.adam(1e-3), mdmm_jax.optax_prepare_update())
         
     def init_traj(self, p_0):
         """
@@ -74,32 +73,39 @@ class SE_IBR:
     def best_response(self, i, state=None, trajectories=None):
         j = (i + 1) % 2
         ego_traj = trajectories[i]
-        A_eqn = jax.random.normal(self.prngkey, (self.n_steps, 3))
-        B_eqn = jax.random.normal(self.prngkey, (self.n_steps, 3))
+        A_eqn = jnp.array(trajectories[i][0])
+        B_eqn = jnp.array(trajectories[i][1])
         # self.p_i = state[i]  # position of car i
         
         """=================Equality connstraints only involving the ego vehicle=================
             : h_i(θ_i) == 0 , ∀ i∈N
             (p_i)_k - (p_i)_k-1 - v_i*dt = 0
         """
-        
-        eq_contiuity = mdmm_jax.eq(lambda v: self.continuity_constraints(*v, self.n_steps, self.c_cont_constraint, state[i]), 0)
-
+        # eq_continuity = self.continuity_constraints(A_eqn, B_eqn, state[i])
+        eq_continuity = mdmm_jax.eq(lambda A_eqn, B_eqn: self.continuity_constraints(A_eqn, B_eqn, state[i]))
         """=================Inequality constraints involving the ego vehicles===================
             : g_i(θ_i) <= 0 , ∀ i∈N
         """
-        ineq_vel = mdmm_jax.ineq(lambda v: self.vel_constraints(*v, self.v_max), 0)
-        ineq_acc = mdmm_jax.ineq(lambda v: self.acc_constraints(*v, self.a_max), 0)
-        ineq_track = mdmm_jax.ineq(lambda v: self.track_constraints(*v, trajectories[j]), 0)
+        ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max))
+        ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max))
+        ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]))
         
         """=================Inequality constraints involving both the vehicles===================
             : γ(θ_i, θ_j) <= 0 , ∀ i,j∈N
         """
-        ineq_collision = mdmm_jax.ineq(lambda v: self.collision_constraints(*v, trajectories), 0)
+        ineq_collision = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.collision_constraints(A_eqn, B_eqn, trajectories))
         
+        # ineq_vel_test = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.v_max - jnp.linalg.norm(jnp.array([A_eqn[-1, 1] + 2 * A_eqn[-1, 2] * (self.n_steps - 1), B_eqn[-1, 1] + 2 * B_eqn[-1, 2] * (self.n_steps - 1)]), ord=2))
         
-        constraints = mdmm_jax.combine(eq_contiuity, ineq_vel, ineq_acc, ineq_track, ineq_collision)
-        mdmm_params = constraints.init((A_eqn, B_eqn))
+        constraints = mdmm_jax.combine(
+                                    #    eq_continuity,
+                                       ineq_vel, 
+                                       ineq_acc, 
+                                       ineq_track, 
+                                    #    ineq_collision
+                                       )
+        
+        mdmm_params = constraints.init(A_eqn, B_eqn)
         params = (A_eqn, B_eqn), mdmm_params
         opt_state = self.optimizer.init(params)
         
@@ -109,65 +115,79 @@ class SE_IBR:
         ax.set_aspect("equal")
         self.track.plot_track(ax, draw_boundaries=True)
         trajectory_line, = ax.plot([], [], "r")
+        start_marker, = ax.plot([], [], "bx")  # Blue cross marker for the start point
+        # init_state_marker, = ax.plot(state[i][0], state[i][1], "rx")  # Red cross marker for the initial state
         
-        for itr in range(100):
+        for itr in range(1000):
             params, opt_state, info = self.update(params, opt_state, constraints, ego_traj)
-            print(params)
+            # print(opt_state)
+            # print(params)
             
             traj_A = params[0][0]
             traj_B = params[0][1]
+            # print(traj_A)
             path_i = []
-            for _ in range(traj_A.shape[0]):
-                path_i.append([traj_A[0] + traj_A[1]*_ + traj_A[2]*_**2, traj_B[0] + traj_B[1]*_ + traj_B[2]*_**2])   
+            velocities = []
+            for t in range(traj_A.shape[0]):
+                path_i.append([traj_A[t, 0] + traj_A[t, 1]*t + traj_A[t, 2]*t**2, traj_B[t, 0] + traj_B[t, 1]*t + traj_B[t, 2]*t**2])   
+                # velocities.append(jnp.linalg.norm(jnp.array([traj_A[t, 1] + 2 * traj_A[t, 2] * t, traj_B[t, 1] + 2 * traj_B[t, 2] * t]), ord=2))
+            # print(list(velocities))
+            # Convert path_i to a numpy array for easier indexing
+            path_i = np.array(path_i)
+            cross = ([path_i[0, 0]], [path_i[0, 1]])
+            # print(cross)
             # Update the plot
-            trajectory_line.set_data(np.array(path_i)[:, 0], np.array(path_i)[:, 1])
-            plt.pause(0.1)  # Pause to update the plot
+            trajectory_line.set_data([path_i[:, 0]], [path_i[:, 1]])
+            start_marker.set_data(*cross)  # Set the start marker at the first point
+            plt.pause(0.001)  # Pause to update the plot
         
         plt.show()
     
     def objective(self, A_eqn, B_eqn, ego_traj):
         nT = self.n_steps - 1
         pos_T = jnp.array([A_eqn[-1][0] + A_eqn[-1][1]*nT + A_eqn[-1][2]*nT**2, B_eqn[-1][0] + B_eqn[-1][1]*nT + B_eqn[-1][2]*nT**2])
-        _, _, tangent_T, _ = self.track.nearest_trackpoint(pos_T)
+        cur_traj_pos_T = jnp.array([ego_traj[0][-1][0] + ego_traj[0][-1][1]*nT + ego_traj[0][-1][2]*nT**2, ego_traj[1][-1][0] + ego_traj[1][-1][1]*nT + ego_traj[1][-1][2]*nT**2])
+        _, _, tangent_T, _ = self.track.nearest_trackpoint(cur_traj_pos_T)
         return -tangent_T@pos_T
     
-    @staticmethod
-    @jit
-    def continuity_constraints(A_eqn, B_eqn, nsteps, c_cont_constraint, state):
+    @partial(jit, static_argnums=(0,))
+    def continuity_constraints(self, A_eqn, B_eqn, state):
         """
         1. CONTINUITY CONSTRAINTS
         - a_t + b_t(t+1) + c_t(t+1)^2 == a_t+1 + b_t+1(t+1) + c_t+1(t+1)^2
-        - for combined constraint, we can add up the constraints
-        - i.e min f(x) s.t. h_i(x) = 0, ∀ i∈N => min f(x) + Σλ_ih_i(x)
-        - Sum comes to be
-        - for a_i terms -> a_(n-1) - a 
-        - for b_i terms -> (n-1)̇⋅b_(n-1) - Σ_i=0^n-2 b_i
-        - for c_i terms -> (n-1)^2⋅c_(n-1) - Σ_i=0^n-2 (2i+1)c_i
-        - can precompute 2i+1 for i=0 to n-2
         """
-        total_sum = A_eqn[-1][0] - A_eqn[0][0]
-        total_sum += (nsteps - 1) * A_eqn[-1][1] - jnp.sum(A_eqn[:-1, 1])
-        total_sum += (nsteps - 1)**2 * A_eqn[-1][2] - jnp.sum(c_cont_constraint * A_eqn[:-1, 2])
-        total_sum += B_eqn[-1][0] - B_eqn[0][0]
-        total_sum += (nsteps - 1) * B_eqn[-1][1] - jnp.sum(B_eqn[:-1, 1])
-        total_sum += (nsteps - 1)**2 * B_eqn[-1][2] - jnp.sum(c_cont_constraint * B_eqn[:-1, 2])
-        #vel
-        total_sum += A_eqn[-1][1] - A_eqn[0][1]
-        total_sum += 2*(nsteps - 1) * A_eqn[-1][2] - 2*jnp.sum(A_eqn[:-1, 2])
-        total_sum += A_eqn[0][0] - state[0] + B_eqn[0][0] - state[1] 
-        return total_sum
-    
-    @staticmethod
-    @jit
-    def vel_constraints(A_eqn, B_eqn, v_max):
-            ks = jnp.arange(A_eqn.shape[0])
-            return jnp.sum(jnp.linalg.norm(jnp.array([A_eqn[:, 1] + 2 * A_eqn[:, 2] * ks, B_eqn[:, 1] + 2 * B_eqn[:, 2] * ks]), axis=0) - v_max)
-    @staticmethod
-    @jit
-    def acc_constraints(A_eqn, B_eqn, a_max):
-        return jnp.sum(A_eqn[:,2]**2 + B_eqn[:,2]**2 - a_max)
+        i = jnp.arange(A_eqn.shape[0] - 1)
+        # Compute individual constraints
+        constraint1 = A_eqn[i, 0] + A_eqn[i, 1] * (i + 1) + A_eqn[i, 2] * (i + 1) ** 2 - A_eqn[i + 1, 0] - A_eqn[i + 1, 1] * (i + 1) - A_eqn[i + 1, 2] * (i + 1) ** 2
+        constraint2 = B_eqn[i, 0] + B_eqn[i, 1] * (i + 1) + B_eqn[i, 2] * (i + 1) ** 2 - B_eqn[i + 1, 0] - B_eqn[i + 1, 1] * (i + 1) - B_eqn[i + 1, 2] * (i + 1) ** 2
+        constraint3 = A_eqn[0, 0] - state[0] + B_eqn[0, 0] - state[1]
+        constraint4 = A_eqn[i, 1] + 2 * A_eqn[i, 2] * (i + 1) - A_eqn[i + 1, 1] - 2 * A_eqn[i + 1, 2] * (i + 1)
+        constraint5 = B_eqn[i, 1] + 2 * B_eqn[i, 2] * (i + 1) - B_eqn[i + 1, 1] - 2 * B_eqn[i + 1, 2] * (i + 1)
+        
+        # Stack constraints vertically
+        stacked_constraints = jnp.hstack([
+            constraint1,
+            constraint2,
+            constraint3,
+            constraint4,
+            constraint5
+        ])
+        # Create a single mdmm_jax.eq constraint
+        # cont_constraints = mdmm_jax.eq(lambda A_eqn, B_eqn: stacked_constraints, 0)
+        
+        # return cont_constraints
+        return stacked_constraints
     
     @partial(jit, static_argnums=(0,))
+    def vel_constraints(self, A_eqn, B_eqn, v_max):
+        ks = jnp.arange(A_eqn.shape[0])
+        return -jnp.linalg.norm(jnp.array([A_eqn[:, 1] + 2 * A_eqn[:, 2] * ks, B_eqn[:, 1] + 2 * B_eqn[:, 2] * ks]), axis=0) + jnp.repeat(v_max, A_eqn.shape[0])
+
+    @partial(jit, static_argnums=(0,))
+    def acc_constraints(self, A_eqn, B_eqn, a_max):
+        return -A_eqn[:,2]**2 + B_eqn[:,2]**2 + a_max
+    
+    # @partial(jit, static_argnums=(0,))
     def track_constraints(self, A_eqn, B_eqn, ego_traj):
         A_ego, B_ego = ego_traj
         ks = jnp.arange(A_eqn.shape[0])
@@ -176,11 +196,11 @@ class SE_IBR:
         p_new = jnp.array([A_eqn[:,0] + A_eqn[:,1]*ks + A_eqn[:,2]*ksq, B_eqn[:,0] + B_eqn[:,1]*ks + B_eqn[:,2]*ksq]).T
         # for every p_prev, run and gather returns from self.track.nearest_trackpoint(p_prev)
         _, cs, ts, ns = jax.vmap(self.track.nearest_trackpoint)(p_prev)
-        track_cost = jnp.sum(-jnp.einsum('ij,ij->i', ns, p_new) + jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius)
-        track_cost += jnp.sum(jnp.einsum('ij,ij->i', ns, p_new) - jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius)
-        return track_cost
+        track_const = -jnp.einsum('ij,ij->i', ns, p_new) + jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
+        track_const += jnp.einsum('ij,ij->i', ns, p_new) - jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
+        return track_const
     
-    @partial(jit, static_argnums=(0,))
+    # @partial(jit, static_argnums=(0,))
     def collision_constraints(self, A_eqn, B_eqn, trajs):
         A_ego, B_ego = trajs[self.i_ego]
         A_opp, B_opp = trajs[(self.i_ego + 1) % 2]
@@ -191,19 +211,20 @@ class SE_IBR:
         p_opp = jnp.array([A_opp[:,0] + A_opp[:,1]*ks + A_opp[:,2]*ksq, B_opp[:,0] + B_opp[:,1]*ks + B_opp[:,2]*ksq]).T
         beta = p_opp - p_ego
         # print(beta.shape)
-        # beta /= jnp.linalg.norm(beta, axis=0) # TODO: see if we can conditionally normalize
+        beta /= jnp.linalg.norm(beta, axis=0) # TODO: see if we can conditionally normalize
         # return jnp.sum(beta@p_opp - beta@p_prev - self.d_coll)
-        return jnp.sum(jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll)
+        print("COLL: ", (jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll).shape)
+        return jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll
     
     # @partial(jit, static_argnums=(0,))
     def system(self, params, constraint, ego_traj):
         main_params, mdmm_params = params
         loss = self.objective(*main_params, ego_traj)
-        mdmm_loss, inf = constraint.loss(mdmm_params, main_params)
+        mdmm_loss, inf = constraint.loss(mdmm_params, *main_params)
         return loss + mdmm_loss, (loss, inf)
     
     # @partial(jit, static_argnums=(0,))
-    def update(self,params, opt_state, constraint, ego_traj):
+    def update(self, params, opt_state, constraint, ego_traj):
         grad, info = jax.grad(self.system, has_aux=True)(params, constraint, ego_traj)
         updates, opt_state = self.optimizer.update(grad, opt_state)
         params = optax.apply_updates(params, updates)
@@ -226,11 +247,6 @@ class SE_IBR:
         return jnp.array(trajectories)
 
 import matplotlib.animation as animation
-
-# = np.array([[0, 0], [0, 0]])
-# ...
-# Assuming SE_IBR and config are defined elsewhere in your code
-
 import argparse
 
 if __name__ == "__main___":
@@ -332,7 +348,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     planner = SE_IBR(config)
-    way_idx = 3
+    way_idx = 2
     ego_state = planner.track.waypoints[way_idx]
     opp_state = (
         planner.track.waypoints[way_idx]
@@ -340,6 +356,7 @@ if __name__ == "__main__":
         - planner.track.track_tangent[way_idx] * 0.3
     )
     state = jnp.array([ego_state, opp_state])
+    print(state)
     trajectories = [planner.init_traj(ego_state), planner.init_traj(opp_state)]
     planner.best_response(0, state, trajectories)
     # time = timeit.timeit(lambda: planner.best_response(0, state, trajectories), number=100)
