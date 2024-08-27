@@ -36,7 +36,7 @@ class SE_IBR:
         self.d_safe = 2 * self.config.collision_radius
         self.t_width = self.track.track_width
         self.prngkey = jax.random.PRNGKey(0)  # Initialize a random key
-        self.optimizer = optax.chain(optax.adam(1e-3), mdmm_jax.optax_prepare_update())
+        self.optimizer = optax.chain(optax.sgd(1e-3), mdmm_jax.optax_prepare_update())
         
     def init_traj(self, p_0):
         """
@@ -86,7 +86,7 @@ class SE_IBR:
         """=================Inequality constraints involving the ego vehicles===================
             : g_i(θ_i) <= 0 , ∀ i∈N
         """
-        ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max))
+        ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max), weight=10)
         ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max))
         ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]))
         
@@ -98,7 +98,7 @@ class SE_IBR:
         # ineq_vel_test = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.v_max - jnp.linalg.norm(jnp.array([A_eqn[-1, 1] + 2 * A_eqn[-1, 2] * (self.n_steps - 1), B_eqn[-1, 1] + 2 * B_eqn[-1, 2] * (self.n_steps - 1)]), ord=2))
         
         constraints = mdmm_jax.combine(
-                                    #    eq_continuity,
+                                       eq_continuity,
                                        ineq_vel, 
                                        ineq_acc, 
                                        ineq_track, 
@@ -120,6 +120,9 @@ class SE_IBR:
         
         for itr in range(1000):
             params, opt_state, info = self.update(params, opt_state, constraints, ego_traj)
+            # stop if the change in the objective is less than 1e-3
+            if info[0] < 1e-3:
+                break
             # print(opt_state)
             # print(params)
             
@@ -130,8 +133,8 @@ class SE_IBR:
             velocities = []
             for t in range(traj_A.shape[0]):
                 path_i.append([traj_A[t, 0] + traj_A[t, 1]*t + traj_A[t, 2]*t**2, traj_B[t, 0] + traj_B[t, 1]*t + traj_B[t, 2]*t**2])   
-                # velocities.append(jnp.linalg.norm(jnp.array([traj_A[t, 1] + 2 * traj_A[t, 2] * t, traj_B[t, 1] + 2 * traj_B[t, 2] * t]), ord=2))
-            # print(list(velocities))
+                velocities.append(jnp.linalg.norm(jnp.array([traj_A[t, 1] + 2 * traj_A[t, 2] * t, traj_B[t, 1] + 2 * traj_B[t, 2] * t]), ord=2))
+            print(list(velocities))
             # Convert path_i to a numpy array for easier indexing
             path_i = np.array(path_i)
             cross = ([path_i[0, 0]], [path_i[0, 1]])
@@ -142,7 +145,8 @@ class SE_IBR:
             plt.pause(0.001)  # Pause to update the plot
         
         plt.show()
-    
+        
+    @partial(jit, static_argnums=(0,))
     def objective(self, A_eqn, B_eqn, ego_traj):
         nT = self.n_steps - 1
         pos_T = jnp.array([A_eqn[-1][0] + A_eqn[-1][1]*nT + A_eqn[-1][2]*nT**2, B_eqn[-1][0] + B_eqn[-1][1]*nT + B_eqn[-1][2]*nT**2])
@@ -187,7 +191,7 @@ class SE_IBR:
     def acc_constraints(self, A_eqn, B_eqn, a_max):
         return -A_eqn[:,2]**2 + B_eqn[:,2]**2 + a_max
     
-    # @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def track_constraints(self, A_eqn, B_eqn, ego_traj):
         A_ego, B_ego = ego_traj
         ks = jnp.arange(A_eqn.shape[0])
@@ -200,7 +204,7 @@ class SE_IBR:
         track_const += jnp.einsum('ij,ij->i', ns, p_new) - jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
         return track_const
     
-    # @partial(jit, static_argnums=(0,))
+    @partial(jit, static_argnums=(0,))
     def collision_constraints(self, A_eqn, B_eqn, trajs):
         A_ego, B_ego = trajs[self.i_ego]
         A_opp, B_opp = trajs[(self.i_ego + 1) % 2]
@@ -348,7 +352,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     planner = SE_IBR(config)
-    way_idx = 2
+    way_idx = 3
     ego_state = planner.track.waypoints[way_idx]
     opp_state = (
         planner.track.waypoints[way_idx]
