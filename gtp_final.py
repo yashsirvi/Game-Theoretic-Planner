@@ -58,12 +58,11 @@ class SE_IBR:
         v_max = self.config.v_max
         a_max = self.config.a_max
         p_i = state[i]  # position of car i
-        p_j = state[j]  # position of car j
         d_coll = 2 * self.config.collision_radius
         d_safe = 2 * self.config.collision_radius
         # p = cp.Variable((self.n_steps, 2))
-        strat_A = cp.Variable((self.n_steps, 3))
-        strat_B = cp.Variable((self.n_steps, 3))
+        strat_A = cp.Variable((self.n_steps, 3)) # for x axis
+        strat_B = cp.Variable((self.n_steps, 3)) # for y axis
         width = self.config.track_width
 
         # === hi(θi)=0 ===  Equality constraints only involving player i
@@ -80,21 +79,21 @@ class SE_IBR:
             a_Atp1, b_Atp1, c_Atp1 = strat_A[k + 1, :]
             a_Btp1, b_Btp1, c_Btp1 = strat_B[k + 1, :]
 
+            # position continuity
+            # [x_n(t_n+1), y_n(t_n+1)] == [x_n+1(t_n+1), y_n+1(t_n+1)] 
             continuity_constraints.append(
-                a_At
-                + b_At * (k+1)
-                + c_At * (k+1)**2
+                (a_At + b_At * (k+1)  + c_At * (k+1)**2)
                 - (a_Atp1 + b_Atp1 * (k + 1) + c_Atp1 * (k + 1) ** 2)
                 == 0
             )   
             continuity_constraints.append(
-                a_Bt
-                + b_Bt * (k+1)
-                + c_Bt * (k+1)**2
+                (a_Bt + b_Bt * (k+1) + c_Bt * (k+1)**2)
                 - (a_Btp1 + b_Btp1 * (k + 1) + c_Btp1 * (k + 1) ** 2)
                 == 0
             )
 
+            # velocity continuity
+            # [ux_n(t_n+1), uy_n(t_n+1)] == [ux_n+1(t_n+1), uy_n+1(t_n+1)]
             continuity_constraints.append(
                 b_At + 2 * c_At * (k+1) - (b_Atp1 + 2 * c_Atp1 * (k + 1)) == 0
             )
@@ -121,22 +120,25 @@ class SE_IBR:
             B_opp = trajectories[j][1][k, :]
             A_ego = trajectories[i][0][k, :]
             B_ego = trajectories[i][1][k, :]
+            # A_ego = strat_A[k, :]
+            # B_ego = strat_B[k, :]
             p_ego = [
-                A_ego[0] + A_ego[1] * (k) + A_ego[2] * (k) ** 2,
-                B_ego[0] + B_ego[1] * (k) + B_ego[2] * (k) ** 2,
+                A_ego[0] + A_ego[1] *k + A_ego[2] *(k ** 2),
+                B_ego[0] + B_ego[1] *k + B_ego[2] *(k ** 2),
             ]
             p_opp = [
-                A_opp[0] + A_opp[1] * (k) + A_opp[2] * (k) ** 2,
-                B_opp[0] + B_opp[1] * (k) + B_opp[2] * (k) ** 2,
+                A_opp[0] + A_opp[1] *k + A_opp[2] *(k ** 2),
+                B_opp[0] + B_opp[1] *k + B_opp[2] *(k ** 2),
             ]
-            # Compute beta, the normal direction vector pointing from the ego's drone position to the opponent's
+            # Compute beta, the normalized direction vector pointing from the ego's drone position to the opponent's
             beta = [p_opp[0] - p_ego[0], p_opp[1] - p_ego[1]]
-            if np.linalg.norm(beta) >= 1e-6:
+            # beta = cp.vstack(beta)
+            if np.linalg.norm(beta, 2) >= 1e-6:
                 # Only normalize if norm is large enough
                 beta /= np.linalg.norm(beta)
             p_curr = [
-                strat_A[k, 0] + strat_A[k, 1] * (k) + strat_A[k, 2] * (k) ** 2,
-                strat_B[k, 0] + strat_B[k, 1] * (k) + strat_B[k, 2] * (k) ** 2,
+                strat_A[k, 0] + strat_A[k, 1] * (k) + strat_A[k, 2] * (k ** 2),
+                strat_B[k, 0] + strat_B[k, 1] * (k) + strat_B[k, 2] * (k ** 2),
             ]
             nc_constraints.append(beta.dot(p_opp) - beta.T @ p_curr >= d_coll)
             # TODO: See wtf is nc_obj and nc_relax_obj
@@ -149,21 +151,11 @@ class SE_IBR:
                 d_coll - (beta.dot(p_opp) - beta.T @ p_curr)
             )
 
-        # bound the constant term
-        traj_i_x = trajectories[i][0][:, 0]
-        traj_i_y = trajectories[i][1][:, 0]
-        max_cix = np.max(traj_i_x)
-        max_ciy = np.max(traj_i_y)
-        # print(max_cix, max_ciy)
+        # bound the constant term in the quadratic
         c_constraint = [strat_A[k, 0] <= 100 for k in range(self.n_steps)]
         c_constraint += [strat_A[k, 0] >= -100 for k in range(self.n_steps)]
         c_constraint += [strat_B[k, 0] <= 100 for k in range(self.n_steps)]
         c_constraint += [strat_B[k, 0] >= -100 for k in range(self.n_steps)]
-
-        # a_constraint = [strat_A[k, 2] <= 100 for k in range(self.n_steps)]
-        # a_constraint += [strat_B[k, 2] <= 100 for k in range(self.n_steps)]
-        # b_constraint = [strat_A[k, 1] <= 100 for k in range(self.n_steps)]
-        
 
         # === g(θi) <= 0 === Inequality constraints only involving player i
         # Speed constraints: v_i - v_max <= 0
@@ -204,7 +196,7 @@ class SE_IBR:
                 strat_A[k, 0] + strat_A[k, 1] * k + strat_A[k, 2] * k ** 2,
                 strat_B[k, 0] + strat_B[k, 1] * k + strat_B[k, 2] * k ** 2,
             ]
-
+            
             track_constraints.append(
                 n[k, :].T @ p_new - np.dot(n[k, :], c)
                 <= width - self.config.collision_radius
@@ -238,12 +230,13 @@ class SE_IBR:
             strat_A[-1, 0] + strat_A[-1, 1] * (ns) + strat_A[-1, 2] * (ns) ** 2,
             strat_B[-1, 0] + strat_B[-1, 1] * (ns) + strat_B[-1, 2] * (ns) ** 2,
         ]
+                        
         obj = -t[-1, :].T @ pT
         # create the problem in cxvpy and solve it
         prob = cp.Problem(
             cp.Minimize(obj),
-            track_constraints + nc_constraints + vel_constraints + acc_constraints + c_constraint,
-            # + continuity_constraints,
+            track_constraints + nc_constraints + vel_constraints + acc_constraints + c_constraint
+            + continuity_constraints,
         )
 
         # try to solve proposed problem
@@ -327,21 +320,18 @@ import matplotlib.animation as animation
 
 # = np.array([[0, 0], [0, 0]])
 # ...
+# Assuming SE_IBR and config are defined elsewhere in your code
 
 if __name__ == "__main__":
     planner = SE_IBR(config)
-    # state = np.array([planner.track.waypoints[0], planner.track.waypoints[0] + [0, 0.1]])
     way_idx = 3
     ego_state = planner.track.waypoints[way_idx]
-    # move opponent along normal
-    # print(planner.track.track_normals[way_idx])
     opp_state = (
         planner.track.waypoints[way_idx]
         + planner.track.track_normals[way_idx] * 0.3
         - planner.track.track_tangent[way_idx] * 0.3
     )
     state = np.array([ego_state, opp_state])
-    # print("STATE:", state)
 
     fig, ax = plt.subplots()
     ax.set_aspect("equal")
@@ -351,9 +341,15 @@ if __name__ == "__main__":
     ego_path, = ax.plot([], [], "r")
     opp_path, = ax.plot([], [], "b")
 
+    def init():
+        ego_point.set_data([], [])
+        opp_point.set_data([], [])
+        ego_path.set_data([], [])
+        opp_path.set_data([], [])
+        return ego_point, opp_point, ego_path, opp_path
+
     def update_frame(i, planner, state):
         trajectory = planner.iterative_br(0, state)
-        # print(trajectory)
         velocities = []
         pathi = []
         pathj = []
@@ -373,21 +369,17 @@ if __name__ == "__main__":
             viy = Bi[1] + 2 * Bi[2] * t
             vi = math.sqrt(vix**2 + viy**2)
             velocities.append(vi)
-        # print("VELOCITIES:", velocities)
         pathi = np.array(pathi)
         pathj = np.array(pathj)
-        ego_point.set_data(state[0][0], state[0][1])
-        opp_point.set_data(state[1][0], state[1][1])
+        ego_point.set_data([state[0][0]], [state[0][1]])
+        opp_point.set_data([state[1][0]], [state[1][1]])
         ego_path.set_data(pathi[:, 0], pathi[:, 1])
         opp_path.set_data(pathj[:, 0], pathj[:, 1])
-        # state = np.array([pathi[2], pathj[2]])
         state[0] = pathi[2]
         state[1] = pathj[2]
         return ego_point, opp_point, ego_path, opp_path
 
     update_frame_partial = partial(update_frame, planner=planner, state=state)
-    ani = animation.FuncAnimation(fig, update_frame_partial, frames=20, interval=200, blit=True,
-                                  )
-    
-    # run the animation
+    ani = animation.FuncAnimation(fig, update_frame_partial, frames=20, init_func=init, interval=200, blit=True)
+
     plt.show()
