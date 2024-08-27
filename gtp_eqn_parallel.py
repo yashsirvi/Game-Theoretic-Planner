@@ -111,47 +111,52 @@ class SE_IBR:
         # (p_i)^k - (p_j)^k <= di for all k
         # cp.SOC is a constraint that the expression is in the second order cone
         # cp.SOC(t, x) is equivalent to ||x||_2 <= t
+        
+        # Assuming the following variables are defined elsewhere in the code:
+        # trajectories, strat_A, strat_B, d_coll, d_safe, self.n_steps
+        
         nc_constraints = []
         nc_obj = cp.Constant(0)
         nc_relax_obj = cp.Constant(0)
         non_collision_objective_exp = 0.5  # exponentially decreasing weight
         ks = np.arange(self.n_steps)
-        # p_egos = np
-        for k in range(self.n_steps):
-            A_opp = trajectories[j][0][k, :]
-            B_opp = trajectories[j][1][k, :]
-            A_ego = trajectories[i][0][k, :]
-            B_ego = trajectories[i][1][k, :]
-            # A_ego = strat_A[k, :]
-            # B_ego = strat_B[k, :]
-            p_ego = [
-                A_ego[0] + A_ego[1] *k + A_ego[2] *(k ** 2),
-                B_ego[0] + B_ego[1] *k + B_ego[2] *(k ** 2),
-            ]
-            p_opp = [
-                A_opp[0] + A_opp[1] *k + A_opp[2] *(k ** 2),
-                B_opp[0] + B_opp[1] *k + B_opp[2] *(k ** 2),
-            ]
-            # Compute beta, the normalized direction vector pointing from the ego's drone position to the opponent's
-            beta = [p_opp[0] - p_ego[0], p_opp[1] - p_ego[1]]
-            # beta = cp.vstack(beta)
-            if np.linalg.norm(beta, 2) >= 1e-6:
-                # Only normalize if norm is large enough
-                beta /= np.linalg.norm(beta)
-            p_curr = [
-                strat_A[k, 0] + strat_A[k, 1] * (k) + strat_A[k, 2] * (k ** 2),
-                strat_B[k, 0] + strat_B[k, 1] * (k) + strat_B[k, 2] * (k ** 2),
-            ]
-            nc_constraints.append(beta.dot(p_opp) - beta.T @ p_curr >= d_coll)
-            # TODO: See wtf is nc_obj and nc_relax_obj
-            # For normal non-collision objective use safety distance
-            nc_obj += (non_collision_objective_exp**k) * cp.pos(
-                d_safe - (beta.dot(p_opp) - beta.T @ p_curr)
-            )
-            # For relaxed non-collision objective use collision distance
-            nc_relax_obj += (non_collision_objective_exp**k) * cp.pos(
-                d_coll - (beta.dot(p_opp) - beta.T @ p_curr)
-            )
+        
+        # Extract trajectories for ego and opponent
+        A_opp = trajectories[j][0][:self.n_steps, :]
+        B_opp = trajectories[j][1][:self.n_steps, :]
+        A_ego = trajectories[i][0][:self.n_steps, :]
+        B_ego = trajectories[i][1][:self.n_steps, :]
+        
+        # Compute positions for ego and opponent
+        p_ego = np.vstack([
+            A_ego[:, 0] + np.multiply(A_ego[:, 1], ks) + np.multiply(A_ego[:, 2], ks ** 2),
+            B_ego[:, 0] + np.multiply(B_ego[:, 1], ks) + np.multiply(B_ego[:, 2], ks ** 2)
+        ]).T
+        
+        p_opp = np.vstack([
+            A_opp[:, 0] + np.multiply(A_opp[:, 1], ks) + np.multiply(A_opp[:, 2], ks ** 2),
+            B_opp[:, 0] + np.multiply(B_opp[:, 1], ks) + np.multiply(B_opp[:, 2], ks ** 2)
+        ]).T
+        
+        # Compute beta, the normalized direction vector pointing from the ego's drone position to the opponent's
+        beta = p_opp - p_ego
+        norm_beta = np.linalg.norm(beta, axis=1, keepdims=True)
+        beta = np.where(norm_beta >= 1e-6, beta / norm_beta, beta)
+        # Compute current positions
+        ks = ks[:, np.newaxis]
+        # Compute p_curr using element-wise multiplication
+        p_curr = cp.vstack([
+            strat_A[:, 0] + cp.multiply(strat_A[:, 1], ks) + cp.multiply(strat_A[:, 2], cp.power(ks, 2)),
+            strat_B[:, 0] + cp.multiply(strat_B[:, 1], ks) + cp.multiply(strat_B[:, 2], cp.power(ks, 2))
+        ]).T
+        print(p_curr.shape)
+        
+        # Compute non-collision constraints
+        nc_constraints = [beta[k].dot(p_opp[k]) - beta[k].dot(p_curr[k]) >= d_coll for k in range(self.n_steps)]
+        
+        # Compute non-collision objectives
+        nc_obj = cp.sum([(non_collision_objective_exp**k) * cp.pos(d_safe - (beta[k].dot(p_opp[k]) - beta[k].dot(p_curr[k]))) for k in range(self.n_steps)])
+        nc_relax_obj = cp.sum([(non_collision_objective_exp**k) * cp.pos(d_coll - (beta[k].dot(p_opp[k]) - beta[k].dot(p_curr[k]))) for k in range(self.n_steps)])
 
         # bound the constant term in the quadratic
         c_constraint = [strat_A[k, 0] <= 100 for k in range(self.n_steps)]

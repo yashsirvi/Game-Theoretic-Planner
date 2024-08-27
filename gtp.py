@@ -1,4 +1,4 @@
-from track import Splined_Track
+from track_jnp import Splined_Track
 import numpy as np
 import config
 import matplotlib.pyplot as plt

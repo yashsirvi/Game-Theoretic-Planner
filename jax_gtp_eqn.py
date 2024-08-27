@@ -1,4 +1,4 @@
-from track import Splined_Track
+from track_jnp import Splined_Track
 import numpy as np
 import jax.numpy as jnp
 import jax
@@ -88,7 +88,7 @@ class SE_IBR:
         """
         ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max), weight=10)
         ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max))
-        ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]))
+        ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]), weight=10)
         
         """=================Inequality constraints involving both the vehicles===================
             : γ(θ_i, θ_j) <= 0 , ∀ i,j∈N
@@ -111,40 +111,42 @@ class SE_IBR:
         
         
         # Assuming self.track.plot_track and self.get_trajectory are defined methods
-        fig, ax = plt.subplots()
-        ax.set_aspect("equal")
-        self.track.plot_track(ax, draw_boundaries=True)
-        trajectory_line, = ax.plot([], [], "r")
-        start_marker, = ax.plot([], [], "bx")  # Blue cross marker for the start point
+        # fig, ax = plt.subplots()
+        # ax.set_aspect("equal")
+        # self.track.plot_track(ax, draw_boundaries=True)
+        # trajectory_line, = ax.plot([], [], "r")
+        # start_marker, = ax.plot([], [], "bx")  # Blue cross marker for the start point
         # init_state_marker, = ax.plot(state[i][0], state[i][1], "rx")  # Red cross marker for the initial state
         
-        for itr in range(1000):
+        for itr in range(5):
             params, opt_state, info = self.update(params, opt_state, constraints, ego_traj)
-            # stop if the change in the objective is less than 1e-3
-            if info[0] < 1e-3:
-                break
-            # print(opt_state)
-            # print(params)
+            # # print(params)
+            # # stop if the change in the objective is less than 1e-3
+            # # if info[0] < 1e-3:
+            # #     break
+            # # print(opt_state)
+            # # print(params)
             
-            traj_A = params[0][0]
-            traj_B = params[0][1]
-            # print(traj_A)
-            path_i = []
-            velocities = []
-            for t in range(traj_A.shape[0]):
-                path_i.append([traj_A[t, 0] + traj_A[t, 1]*t + traj_A[t, 2]*t**2, traj_B[t, 0] + traj_B[t, 1]*t + traj_B[t, 2]*t**2])   
-                velocities.append(jnp.linalg.norm(jnp.array([traj_A[t, 1] + 2 * traj_A[t, 2] * t, traj_B[t, 1] + 2 * traj_B[t, 2] * t]), ord=2))
-            print(list(velocities))
-            # Convert path_i to a numpy array for easier indexing
-            path_i = np.array(path_i)
-            cross = ([path_i[0, 0]], [path_i[0, 1]])
-            # print(cross)
-            # Update the plot
-            trajectory_line.set_data([path_i[:, 0]], [path_i[:, 1]])
-            start_marker.set_data(*cross)  # Set the start marker at the first point
-            plt.pause(0.001)  # Pause to update the plot
+            # traj_A = params[0][0]
+            # traj_B = params[0][1]
+            # # print(traj_A)
+            # path_i = []
+            # velocities = []
+            # for t in range(traj_A.shape[0]):
+            #     path_i.append([traj_A[t, 0] + traj_A[t, 1]*t + traj_A[t, 2]*t**2, traj_B[t, 0] + traj_B[t, 1]*t + traj_B[t, 2]*t**2])   
+            #     velocities.append(jnp.linalg.norm(jnp.array([traj_A[t, 1] + 2 * traj_A[t, 2] * t, traj_B[t, 1] + 2 * traj_B[t, 2] * t]), ord=2))
+            # print(list(velocities))
+            # # Convert path_i to a numpy array for easier indexing
+            # path_i = np.array(path_i)
+            # cross = ([path_i[0, 0]], [path_i[0, 1]])
+            # # print(cross)
+            # # Update the plot
+            # trajectory_line.set_data([path_i[:, 0]], [path_i[:, 1]])
+            # start_marker.set_data(*cross)  # Set the start marker at the first point
+            # plt.pause(0.001)  # Pause to update the plot
         
-        plt.show()
+        return params[0]
+        # plt.show()
         
     @partial(jit, static_argnums=(0,))
     def objective(self, A_eqn, B_eqn, ego_traj):
@@ -240,11 +242,11 @@ class SE_IBR:
         t0 = time.time()
         for i_game in range(n_game_iterations - 1):
             for i in [i_ego, (i_ego + 1) % 2]:
-                for i_sqp in range(n_sqp_iterations - 1):
-                    trajectories[i] = self.best_response(i, state, trajectories)
+                # for i_sqp in range(n_sqp_iterations - 1):
+                trajectories[i] = self.best_response(i, state, trajectories)
         # one last time for i_ego
-        for i_sqp in range(n_sqp_iterations):
-            trajectories[i_ego] = self.best_response(i_ego, state, trajectories)
+        # for i_sqp in range(n_sqp_iterations):
+        #     trajectories[i_ego] = self.best_response(i_ego, state, trajectories)
         t1 = time.time()
         print("Total IBR solution time: ", t1 - t0)
         # return trajectories[i_ego]
@@ -253,7 +255,7 @@ class SE_IBR:
 import matplotlib.animation as animation
 import argparse
 
-if __name__ == "__main___":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the planner simulation.")
     parser.add_argument("--animate", action="store_true", help="Run the simulation with animation.")
     args = parser.parse_args()
@@ -266,7 +268,7 @@ if __name__ == "__main___":
         + planner.track.track_normals[way_idx] * 0.3
         - planner.track.track_tangent[way_idx] * 0.3
     )
-    state = jnp.array([ego_state, opp_state])
+    state = np.array([ego_state, opp_state])
 
     if args.animate:
         fig, ax = plt.subplots()
@@ -278,7 +280,7 @@ if __name__ == "__main___":
         opp_path, = ax.plot([], [], "b")
 
         def init():
-            ego_point.set_data([], [])[[1,2,3],[0,1,0]], [[0,0,0], [0,0,0]]
+            ego_point.set_data([], [])
             opp_point.set_data([], [])
             ego_path.set_data([], [])
             opp_path.set_data([], [])
@@ -346,21 +348,21 @@ if __name__ == "__main___":
             state[0] = pathi[2]
             state[1] = pathj[2]
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the planner simulation.")
-    parser.add_argument("--animate", action="store_true", help="Run the simulation with animation.")
-    args = parser.parse_args()
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description="Run the planner simulation.")
+#     parser.add_argument("--animate", action="store_true", help="Run the simulation with animation.")
+#     args = parser.parse_args()
 
-    planner = SE_IBR(config)
-    way_idx = 3
-    ego_state = planner.track.waypoints[way_idx]
-    opp_state = (
-        planner.track.waypoints[way_idx]
-        + planner.track.track_normals[way_idx] * 0.3
-        - planner.track.track_tangent[way_idx] * 0.3
-    )
-    state = jnp.array([ego_state, opp_state])
-    print(state)
-    trajectories = [planner.init_traj(ego_state), planner.init_traj(opp_state)]
-    planner.best_response(0, state, trajectories)
-    # time = timeit.timeit(lambda: planner.best_response(0, state, trajectories), number=100)
+#     planner = SE_IBR(config)
+#     way_idx = 1
+#     ego_state = planner.track.waypoints[way_idx]
+#     opp_state = (
+#         planner.track.waypoints[way_idx]
+#         + planner.track.track_normals[way_idx] * 0.3
+#         - planner.track.track_tangent[way_idx] * 0.3
+#     )
+#     state = jnp.array([ego_state, opp_state])
+#     print(state)
+#     trajectories = [planner.init_traj(opp_state), planner.init_traj(opp_state)]
+#     planner.best_response(0, state, trajectories)
+#     # time = timeit.timeit(lambda: planner.best_response(0, state, trajectories), number=100)
