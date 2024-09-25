@@ -25,6 +25,7 @@ def system(params):
      # f(x) + \lambda g(x) + c/2 g(x)^2
      # f(x) = loss
      # \lambda g(x) + c/2 g(x)^2 = mdmm_loss
+    print("d")
     return loss + mdmm_loss, (loss, inf)
 
 @jax.jit
@@ -32,6 +33,7 @@ def update(params, opt_state):
     grad, info = jax.grad(system, has_aux=True)(params)
     updates, opt_state = opt.update(grad, opt_state)
     params = optax.apply_updates(params, updates)
+    # jax.debug.print("{x}", x = params)
     return params, opt_state, info
 
 for i in range(100):

@@ -199,10 +199,10 @@ class SE_IBR:
                 strat_B[k, 0] + strat_B[k, 1] * k + strat_B[k, 2] * k ** 2,
             ]
             
-            track_constraints.append(
+            track_constraints.append(   
                 n[k, :].T @ p_new - np.dot(n[k, :], c)
                 <= width - self.config.collision_radius
-            )
+            )   
             track_constraints.append(
                 n[k, :].T @ p_new - np.dot(n[k, :], c)
                 >= -(width - self.config.collision_radius)

@@ -37,7 +37,8 @@ class SE_IBR:
         self.t_width = self.track.track_width
         self.prngkey = jax.random.PRNGKey(0)  # Initialize a random key
         self.optimizer = optax.chain(optax.sgd(1e-3), mdmm_jax.optax_prepare_update())
-        
+    
+    @partial(jit, static_argnums=(0,))
     def init_traj(self, p_0):
         """
         Initialize the trajectory at the start of the race.
@@ -47,28 +48,26 @@ class SE_IBR:
         :param p_0: Start point of the trajectory
         :return: Initial trajectory
         """
-        Ai = np.zeros((self.n_steps, 3))
-        Bi = np.zeros((self.n_steps, 3))
-    
-        
+        Ai = jnp.zeros((self.n_steps, 3))
+        Bi = jnp.zeros((self.n_steps, 3))
+
         for k in range(self.n_steps):
             _, _, t0, _ = self.track.nearest_trackpoint(p_0)
             p_1 = p_0 + self.config.v_max * t0
-            # _, c1, t1, n1 = self.track.nearest_trackpoint(p_1)
             p_2 = p_1 + self.config.v_max * t0 * 2
-            
-            ks = np.array([k, k+1.0, k+2.0])
-            psx = np.array([p_0[0], p_1[0], p_2[0]])
-            psy = np.array([p_0[1], p_1[1], p_2[1]])
-            eqn_x = np.polyfit(ks, psx, 2) # TAKES ABOUT 1e-4s
-            eqn_y = np.polyfit(ks, psy, 2)
-            
-            Ai[k, :] = eqn_x[::-1]
-            Bi[k, :] = eqn_y[::-1]
-            
+
+            ks = jnp.array([k, k+1.0, k+2.0])
+            psx = jnp.array([p_0[0], p_1[0], p_2[0]])
+            psy = jnp.array([p_0[1], p_1[1], p_2[1]])
+            eqn_x = jnp.polyfit(ks, psx, 2)
+            eqn_y = jnp.polyfit(ks, psy, 2)
+
+            Ai = Ai.at[k, :].set(eqn_x[::-1])
+            Bi = Bi.at[k, :].set(eqn_y[::-1])
+
             p_0 = p_1
-            
-        return (Ai, Bi) 
+
+        return (Ai, Bi)
 
     def best_response(self, i, state=None, trajectories=None):
         j = (i + 1) % 2
@@ -88,7 +87,7 @@ class SE_IBR:
         """
         ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max), weight=10)
         ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max))
-        ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]), weight=10)
+        ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]), weight=5)
         
         """=================Inequality constraints involving both the vehicles===================
             : γ(θ_i, θ_j) <= 0 , ∀ i,j∈N
@@ -99,10 +98,10 @@ class SE_IBR:
         
         constraints = mdmm_jax.combine(
                                        eq_continuity,
-                                       ineq_vel, 
-                                       ineq_acc, 
+                                    #    ineq_vel, 
+                                    #    ineq_acc, 
                                        ineq_track, 
-                                    #    ineq_collision
+                                       ineq_collision
                                        )
         
         mdmm_params = constraints.init(A_eqn, B_eqn)
@@ -117,6 +116,7 @@ class SE_IBR:
         # trajectory_line, = ax.plot([], [], "r")
         # start_marker, = ax.plot([], [], "bx")  # Blue cross marker for the start point
         # init_state_marker, = ax.plot(state[i][0], state[i][1], "rx")  # Red cross marker for the initial state
+        
         
         for itr in range(5):
             params, opt_state, info = self.update(params, opt_state, constraints, ego_traj)
@@ -147,7 +147,7 @@ class SE_IBR:
         
         return params[0]
         # plt.show()
-        
+    
     @partial(jit, static_argnums=(0,))
     def objective(self, A_eqn, B_eqn, ego_traj):
         nT = self.n_steps - 1
@@ -160,10 +160,12 @@ class SE_IBR:
     def continuity_constraints(self, A_eqn, B_eqn, state):
         """
         1. CONTINUITY CONSTRAINTS
-        - a_t + b_t(t+1) + c_t(t+1)^2 == a_t+1 + b_t+1(t+1) + c_t+1(t+1)^2
+        - a_t + b_t(t+1) + c_t(t+1)^2 == a_t+1 + b_t+1(t+1) + c_t+1(t+1)^2      
         """
         i = jnp.arange(A_eqn.shape[0] - 1)
         # Compute individual constraints
+        # t = i + 1
+        # t_1 = t -1
         constraint1 = A_eqn[i, 0] + A_eqn[i, 1] * (i + 1) + A_eqn[i, 2] * (i + 1) ** 2 - A_eqn[i + 1, 0] - A_eqn[i + 1, 1] * (i + 1) - A_eqn[i + 1, 2] * (i + 1) ** 2
         constraint2 = B_eqn[i, 0] + B_eqn[i, 1] * (i + 1) + B_eqn[i, 2] * (i + 1) ** 2 - B_eqn[i + 1, 0] - B_eqn[i + 1, 1] * (i + 1) - B_eqn[i + 1, 2] * (i + 1) ** 2
         constraint3 = A_eqn[0, 0] - state[0] + B_eqn[0, 0] - state[1]
@@ -202,8 +204,17 @@ class SE_IBR:
         p_new = jnp.array([A_eqn[:,0] + A_eqn[:,1]*ks + A_eqn[:,2]*ksq, B_eqn[:,0] + B_eqn[:,1]*ks + B_eqn[:,2]*ksq]).T
         # for every p_prev, run and gather returns from self.track.nearest_trackpoint(p_prev)
         _, cs, ts, ns = jax.vmap(self.track.nearest_trackpoint)(p_prev)
-        track_const = -jnp.einsum('ij,ij->i', ns, p_new) + jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
-        track_const += jnp.einsum('ij,ij->i', ns, p_new) - jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
+        # n_1 = ns[-1]
+        # t_1 = ts[-1]
+        # p_n_1 = p_new[-1]
+        # val = n_1 @ (p_n_1 - cs[-1]) + self.t_width - self.config.collision_radius      
+        # jax.debug.print()
+        track_const1 = -jnp.einsum('ij,ij->i', ns, p_new) + jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
+        track_const2 = jnp.einsum('ij,ij->i', ns, p_new) - jnp.einsum('ij,ij->i', ns, cs) + self.t_width - self.config.collision_radius
+        track_const = jnp.hstack([track_const1, track_const2])
+        # jax.debug.print("{track_const}", track_const=track_const)
+        # jax.debug.print("pnew: {p_new}", p_new=p_new)
+        # jax.debug.print("cs:{cs}\nts:{ts}\nns:{ns}", cs=cs, ts=ts, ns=ns)
         return track_const
     
     @partial(jit, static_argnums=(0,))
@@ -219,8 +230,10 @@ class SE_IBR:
         # print(beta.shape)
         beta /= jnp.linalg.norm(beta, axis=0) # TODO: see if we can conditionally normalize
         # return jnp.sum(beta@p_opp - beta@p_prev - self.d_coll)
-        print("COLL: ", (jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll).shape)
-        return jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll
+        # print("COLL: ", (jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll).shape)
+        collision_cost = jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll
+        jax.debug.print("COLL: {collision_cost}", collision_cost=collision_cost)
+        return collision_cost
     
     # @partial(jit, static_argnums=(0,))
     def system(self, params, constraint, ego_traj):
@@ -238,12 +251,21 @@ class SE_IBR:
         
     def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=3):
         trajectories = [self.init_traj(state[i, :]) for i in [0, 1]]
-
+        init_trajs = trajectories.copy()
         t0 = time.time()
         for i_game in range(n_game_iterations - 1):
             for i in [i_ego, (i_ego + 1) % 2]:
                 # for i_sqp in range(n_sqp_iterations - 1):
                 trajectories[i] = self.best_response(i, state, trajectories)
+                
+        # pi1a = init_trajs[0][0]
+        # pi1b = init_trajs[0][1]
+        # pi2a = init_trajs[1][0]
+        # pi2b = init_trajs[1][1]
+        # print("DIFF p1a", pi1a - trajectories[0][0])
+        # print("DIFF p1b", pi1b - trajectories[0][1])
+        # print("DIFF p2a", pi2a - trajectories[1][0])
+        # print("DIFF p2b", pi2b - trajectories[1][1])
         # one last time for i_ego
         # for i_sqp in range(n_sqp_iterations):
         #     trajectories[i_ego] = self.best_response(i_ego, state, trajectories)
@@ -265,8 +287,8 @@ if __name__ == "__main__":
     ego_state = planner.track.waypoints[way_idx]
     opp_state = (
         planner.track.waypoints[way_idx]
-        + planner.track.track_normals[way_idx] * 0.3
-        - planner.track.track_tangent[way_idx] * 0.3
+        + planner.track.track_normals[way_idx] * 0.4
+        - planner.track.track_tangent[way_idx] * 0.4
     )
     state = np.array([ego_state, opp_state])
 
