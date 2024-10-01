@@ -87,7 +87,7 @@ def eq(fun, damping=1., weight=1., reduction=jnp.sum):
     """
 
     def init_fn(*args, **kwargs):
-        print("LANG", jnp.zeros_like(fun(*args, **kwargs)).shape)
+        # print("LANG", jnp.zeros_like(fun(*args, **kwargs)).shape)
         return {'lambda': LagrangeMultiplier(jnp.zeros_like(fun(*args, **kwargs)))}
 
     def loss_fn(params, *args, **kwargs):
@@ -118,7 +118,7 @@ def ineq(fun, damping=1., weight=1., reduction=jnp.sum):
 
     def init_fn(*args, **kwargs):
         out = fun(*args, **kwargs)
-        print("LANG", jnp.zeros_like(out).shape)
+        # print("LANG", jnp.zeros_like(out).shape)
         return {'lambda': LagrangeMultiplier(jnp.zeros_like(out)),
                 'slack': jax.nn.relu(out) ** 0.5}
 
@@ -138,7 +138,7 @@ def combine(*args):
     Returns:
         A single (init_fn, loss_fn) tuple that wraps the input constraints.
     """
-    print("ARGS", args)
+    # print("ARGS", args)
     init_fns, loss_fns = zip(*args)
 
     def init_fn(*args, **kwargs):

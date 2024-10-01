@@ -86,20 +86,20 @@ class SE_IBR:
             : g_i(θ_i) <= 0 , ∀ i∈N
         """
         ineq_vel = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.vel_constraints(A_eqn, B_eqn, self.v_max), weight=10)
-        ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max))
+        ineq_acc = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.acc_constraints(A_eqn, B_eqn, self.a_max), weight=10)
         ineq_track = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.track_constraints(A_eqn, B_eqn, trajectories[i]), weight=5)
         
         """=================Inequality constraints involving both the vehicles===================
             : γ(θ_i, θ_j) <= 0 , ∀ i,j∈N
         """
-        ineq_collision = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.collision_constraints(A_eqn, B_eqn, trajectories))
+        ineq_collision = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.collision_constraints(A_eqn, B_eqn, trajectories), weight=0.1)
         
         # ineq_vel_test = mdmm_jax.ineq(lambda A_eqn, B_eqn: self.v_max - jnp.linalg.norm(jnp.array([A_eqn[-1, 1] + 2 * A_eqn[-1, 2] * (self.n_steps - 1), B_eqn[-1, 1] + 2 * B_eqn[-1, 2] * (self.n_steps - 1)]), ord=2))
         
         constraints = mdmm_jax.combine(
                                        eq_continuity,
-                                    #    ineq_vel, 
-                                    #    ineq_acc, 
+                                       ineq_vel, 
+                                       ineq_acc, 
                                        ineq_track, 
                                        ineq_collision
                                        )
@@ -118,7 +118,7 @@ class SE_IBR:
         # init_state_marker, = ax.plot(state[i][0], state[i][1], "rx")  # Red cross marker for the initial state
         
         
-        for itr in range(5):
+        for itr in range(3):
             params, opt_state, info = self.update(params, opt_state, constraints, ego_traj)
             # # print(params)
             # # stop if the change in the objective is less than 1e-3
@@ -232,7 +232,7 @@ class SE_IBR:
         # return jnp.sum(beta@p_opp - beta@p_prev - self.d_coll)
         # print("COLL: ", (jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll).shape)
         collision_cost = jnp.einsum('ij,ij->i', beta, p_opp) - jnp.einsum('ij,ij->i', beta, p_prev) - self.d_coll
-        jax.debug.print("COLL: {collision_cost}", collision_cost=collision_cost)
+        # jax.debug.print("COLL: {collision_cost}", collision_cost=collision_cost)
         return collision_cost
     
     # @partial(jit, static_argnums=(0,))
@@ -249,7 +249,7 @@ class SE_IBR:
         params = optax.apply_updates(params, updates)
         return params, opt_state, info
         
-    def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=3):
+    def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=2):
         trajectories = [self.init_traj(state[i, :]) for i in [0, 1]]
         init_trajs = trajectories.copy()
         t0 = time.time()
@@ -267,8 +267,14 @@ class SE_IBR:
         # print("DIFF p2a", pi2a - trajectories[1][0])
         # print("DIFF p2b", pi2b - trajectories[1][1])
         # one last time for i_ego
-        # for i_sqp in range(n_sqp_iterations):
-        #     trajectories[i_ego] = self.best_response(i_ego, state, trajectories)
+        prevtraj = trajectories[i_ego]
+        for i_sqp in range(n_sqp_iterations):
+            trajectories[i_ego] = self.best_response(i_ego, state, trajectories)
+        new_traj = trajectories[i_ego]
+        traj_diff1 = prevtraj[0] - new_traj[0]
+        traj_diff2 = prevtraj[1] - new_traj[1]
+        print("MAX DIFF: ", jnp.max(jnp.abs(traj_diff1)), jnp.max(jnp.abs(traj_diff2)))
+        print("MEAN DIFF: ", jnp.mean(jnp.abs(traj_diff1)), jnp.mean(jnp.abs(traj_diff2)))
         t1 = time.time()
         print("Total IBR solution time: ", t1 - t0)
         # return trajectories[i_ego]
@@ -287,8 +293,8 @@ if __name__ == "__main__":
     ego_state = planner.track.waypoints[way_idx]
     opp_state = (
         planner.track.waypoints[way_idx]
-        + planner.track.track_normals[way_idx] * 0.4
-        - planner.track.track_tangent[way_idx] * 0.4
+        + planner.track.track_normals[way_idx] * 0.2
+        + planner.track.track_tangent[way_idx] * 0.2
     )
     state = np.array([ego_state, opp_state])
 
@@ -369,18 +375,9 @@ if __name__ == "__main__":
             pathj = jnp.array(pathj)
             state[0] = pathi[2]
             state[1] = pathj[2]
-
-# if __name__ == "__main__":
-#     parser = argparse.ArgumentParser(description="Run the planner simulation.")
-#     parser.add_argument("--animate", action="store_true", help="Run the simulation with animation.")
-#     args = parser.parse_args()
-
-#     planner = SE_IBR(config)
-#     way_idx = 1
-#     ego_state = planner.track.waypoints[way_idx]
-#     opp_state = (
-#         planner.track.waypoints[way_idx]
-#         + planner.track.track_normals[way_idx] * 0.3
+ame_iterations - 1):
+            for i in [i_ego, (i_ego + 1) % 2]:
+                # for i_sqp in 
 #         - planner.track.track_tangent[way_idx] * 0.3
 #     )
 #     state = jnp.array([ego_state, opp_state])

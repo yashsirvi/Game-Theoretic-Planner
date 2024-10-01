@@ -302,7 +302,7 @@ class SE_IBR:
         trajectory_result = trajectories[i]
         return trajectory_result
 
-    def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=3):
+    def iterative_br(self, i_ego, state, n_game_iterations=2, n_sqp_iterations=5):
         trajectories = [self.init_traj(i, state[i, :]) for i in [0, 1]]
 
         t0 = time.time()
@@ -330,8 +330,8 @@ if __name__ == "__main__":
     ego_state = planner.track.waypoints[way_idx]
     opp_state = (
         planner.track.waypoints[way_idx]
-        + planner.track.track_normals[way_idx] * 0.3
-        - planner.track.track_tangent[way_idx] * 0.3
+        - planner.track.track_normals[way_idx] * 0.1
+        - planner.track.track_tangent[way_idx] * 0.1
     )
     state = np.array([ego_state, opp_state])
 

@@ -5,7 +5,7 @@ track_waypoints = np.array([[0,0], [2.5, 2], [4, 0], [6, 9], [1, 8],[0, 0]])
 track_width = 0.5
 max_curvature = 1.0
 
-collision_radius = 0.1
+collision_radius = 0.0
 v_max = 0.3
 a_max = 1
 
